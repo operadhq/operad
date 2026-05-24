@@ -1,7 +1,7 @@
 {
   "name": "@operad/adapter-postgres",
   "version": "0.1.0",
-  "description": "Postgres storage adapter for Operad",
+  "description": "Postgres storage adapter for Operad — production-ready with recursive CTE tracing and JSONB queries",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -19,6 +19,22 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist"
   },
+  "keywords": [
+    "operad",
+    "ai-agents",
+    "storage-adapter",
+    "postgres",
+    "event-sourcing",
+    "audit-trail"
+  ],
+  "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/operadhq/operad",
+    "directory": "typescript/packages/adapter-postgres"
+  },
+  "homepage": "https://operad.dev",
+  "bugs": "https://github.com/operadhq/operad/issues",
   "dependencies": {
     "@operad/core": "workspace:*",
     "postgres": "^3.4.0"

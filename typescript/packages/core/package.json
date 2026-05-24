@@ -1,7 +1,7 @@
 {
   "name": "@operad/core",
   "version": "0.1.0",
-  "description": "Event-sourced graph runtime for AI agents",
+  "description": "Event-sourced graph runtime for AI agents. Every mutation is an event. Every event has a cause. Every decision is recorded.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -19,6 +19,24 @@
     "test": "vitest run",
     "clean": "rm -rf dist"
   },
+  "keywords": [
+    "ai-agents",
+    "event-sourcing",
+    "knowledge-graph",
+    "agent-memory",
+    "provenance",
+    "audit-trail",
+    "causal-chains",
+    "decision-records"
+  ],
+  "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/operadhq/operad",
+    "directory": "typescript/packages/core"
+  },
+  "homepage": "https://operad.dev",
+  "bugs": "https://github.com/operadhq/operad/issues",
   "devDependencies": {
     "@operad/tsconfig": "workspace:*",
     "typescript": "^5.7.0",

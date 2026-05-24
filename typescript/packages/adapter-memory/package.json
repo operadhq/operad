@@ -1,7 +1,7 @@
 {
   "name": "@operad/adapter-memory",
   "version": "0.1.0",
-  "description": "In-memory storage adapter for Operad",
+  "description": "In-memory storage adapter for Operad — perfect for development, testing, and short-lived processes",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -19,6 +19,21 @@
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist"
   },
+  "keywords": [
+    "operad",
+    "ai-agents",
+    "storage-adapter",
+    "in-memory",
+    "event-sourcing"
+  ],
+  "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/operadhq/operad",
+    "directory": "typescript/packages/adapter-memory"
+  },
+  "homepage": "https://operad.dev",
+  "bugs": "https://github.com/operadhq/operad/issues",
   "dependencies": {
     "@operad/core": "workspace:*"
   },
