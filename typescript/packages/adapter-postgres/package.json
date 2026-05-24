@@ -1,0 +1,33 @@
+{
+  "name": "@operad/adapter-postgres",
+  "version": "0.1.0",
+  "description": "Postgres storage adapter for Operad",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@operad/core": "workspace:*",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@operad/tsconfig": "workspace:*",
+    "typescript": "^5.7.0",
+    "tsup": "^8.3.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}
