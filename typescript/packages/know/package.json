@@ -1,0 +1,50 @@
+{
+  "name": "@operad/know",
+  "version": "0.1.0",
+  "description": "Knowledge extraction for AI agents. Turn documents into provenance-tracked knowledge graphs — locally, never uploaded.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "ai-agents",
+    "knowledge-graph",
+    "knowledge-extraction",
+    "document-parsing",
+    "provenance",
+    "operad",
+    "local-first"
+  ],
+  "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/operadhq/operad",
+    "directory": "typescript/packages/know"
+  },
+  "homepage": "https://operad.dev",
+  "bugs": "https://github.com/operadhq/operad/issues",
+  "dependencies": {
+    "@operad/core": "workspace:*",
+    "@operad/adapter-memory": "workspace:*"
+  },
+  "devDependencies": {
+    "@operad/tsconfig": "workspace:*",
+    "typescript": "^5.7.0",
+    "tsup": "^8.3.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}
