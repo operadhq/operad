@@ -1,0 +1,36 @@
+# Run locally: docker compose up
+# This gives you Operad + Postgres in one command.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: operad
+      POSTGRES_PASSWORD: operad
+      POSTGRES_DB: operad
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U operad"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  operad:
+    build:
+      context: ../../
+      dockerfile: packages/server/Dockerfile
+    ports:
+      - "3111:3111"
+    environment:
+      PORT: 3111
+      ADAPTER: postgres
+      DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
