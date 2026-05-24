@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "demo": "tsx src/insurance-agent.ts",
-    "demo:fraud": "tsx src/fraud-detection.ts"
+    "demo:fraud": "tsx src/fraud-detection.ts",
+    "demo:onboarding": "tsx src/agent-onboarding.ts",
+    "demo:carrier": "tsx src/carrier-routing.ts",
+    "demo:appetite": "tsx src/carrier-appetite.ts"
   },
   "dependencies": {
     "@operad/core": "workspace:*",
