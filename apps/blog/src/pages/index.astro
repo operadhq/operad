@@ -1,0 +1,105 @@
+---
+import Base from '../layouts/Base.astro'
+import { getCollection } from 'astro:content'
+
+const posts = (await getCollection('blog'))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
+---
+
+<Base title="Engram">
+  <div class="hero">
+    <h1>Engram</h1>
+    <p class="tagline">Event-sourced graph runtime for AI agents.</p>
+    <p class="sub">Every mutation is an event. Every event has a cause. Every decision is recorded.</p>
+    <div class="cta">
+      <code>npm install @engram-ai/core @engram-ai/adapter-memory</code>
+    </div>
+  </div>
+
+  <hr />
+
+  <section>
+    <h2>Latest posts</h2>
+    <ul class="post-list">
+      {posts.map((post) => (
+        <li>
+          <a href={`/blog/${post.slug}`}>
+            <time datetime={post.data.date.toISOString()}>
+              {post.data.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </time>
+            <span class="post-title">{post.data.title}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    text-align: center;
+    padding: 2rem 0 3rem;
+  }
+  .hero h1 {
+    font-size: 3rem;
+    letter-spacing: -0.04em;
+    margin-bottom: 0.5rem;
+  }
+  .tagline {
+    color: var(--accent);
+    font-size: 1.15rem;
+    margin-bottom: 0.5rem;
+  }
+  .sub {
+    color: var(--text-muted);
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .cta code {
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+  }
+  h2 {
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    margin-bottom: 1.5rem;
+    margin-top: 0;
+  }
+  .post-list {
+    list-style: none;
+    padding: 0;
+  }
+  .post-list li {
+    margin-bottom: 0;
+  }
+  .post-list a {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .post-list a:hover {
+    text-decoration: none;
+    background: var(--bg-secondary);
+    margin: 0 -0.75rem;
+    padding: 0.75rem;
+    border-radius: 6px;
+    border-bottom-color: transparent;
+  }
+  .post-list time {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    min-width: 100px;
+  }
+  .post-title {
+    font-weight: 500;
+  }
+</style>

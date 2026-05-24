@@ -1,0 +1,112 @@
+---
+title: "Why I Built Engram"
+description: "I was building AI voice agents for insurance agencies. Then I hit a wall that no TypeScript library could solve."
+date: 2026-05-23
+author: "Charles Javelona"
+tags: ["engram", "open-source", "origin-story"]
+---
+
+I've been building AI voice agents for insurance agencies. Our agents pick up the phone, talk to customers, collect intake information, process claims. Real calls, real people, real stakes.
+
+And for months, it worked — until it didn't.
+
+## The wall
+
+Here's what happened. A customer called in about a water damage claim. Our voice agent handled the intake perfectly. Collected the policy number, recorded the damage details, pulled the relevant coverage terms. A clean interaction.
+
+Two days later, the same customer called back with a follow-up question. Our agent had no idea who they were. It didn't remember the claim, the policy, or the conversation. It started from scratch, asking the same questions again.
+
+The customer was not happy.
+
+This is the agent memory problem. Every AI framework gives you tool calling, streaming, and prompt chaining. None of them give you memory that persists across sessions. When the conversation ends, the agent forgets everything.
+
+## What I tried
+
+I looked at everything:
+
+- **LangChain Memory** — string-based conversation buffers. No structure, no relations between facts, no persistence beyond the session.
+- **Mem0** — promising concept, but Python-first, closed source, and it's a managed service. I needed something I could embed in my own TypeScript app, not a vendor dependency.
+- **Vector databases** — great for semantic search, useless for "why did the agent make this decision?" or "what facts have gone stale?"
+- **Just using Postgres directly** — sure, but then I'm building my own event tracking, causal chains, staleness detection, behavior system. That's not "using Postgres," that's building a framework.
+
+None of them solved the actual problem: giving an AI agent structured, traceable, self-correcting memory.
+
+## The insurance problem specifically
+
+Insurance is a regulated industry. When an AI agent approves or denies a claim, someone will ask why. Not vaguely — specifically. "Show me the exact chain of evidence that led to this decision."
+
+That's not a nice-to-have. That's a compliance requirement.
+
+I needed:
+
+1. **Objects and relations** — a claim is connected to evidence, which is connected to a policy. That's a graph, not a flat table.
+2. **Causal chains** — every mutation should trace back to its cause. The claim was created because of a phone call. The approval happened because of evidence X, Y, Z.
+3. **Decision records** — not just what the agent chose, but what it *didn't* choose and why. "Considered escalating to human, rejected because confidence was 0.92."
+4. **Staleness detection** — a phone number from 6 months ago might be wrong. The agent should know what's fresh and what needs re-verification.
+
+## Finding ActiveGraph
+
+Then I found [ActiveGraph](https://github.com/SynapticSage/ActiveGraph), a Python library that treats agent memory as an event-sourced knowledge graph. It clicked immediately. This was the right abstraction: a graph where every mutation is an event, every event has a cause, and you can trace any state back to its origin.
+
+But ActiveGraph is Python-only. My agents run on TypeScript. Most production AI agents run on TypeScript — Vercel AI SDK, LangChain.js, the entire serverless ecosystem. There was nothing like this for the TS world.
+
+## So I built Engram
+
+The name comes from neuroscience. An **engram** is the physical trace of a memory in the brain — a neural assembly that encodes an experience. Engrams are formed during experience, replayed during recall, consolidated over time, and pruned when no longer relevant.
+
+That's exactly what an agent memory system should do:
+
+- **Form** memories during agent runs (objects, relations, events)
+- **Replay** them during audits (trace causal chains backward)
+- **Consolidate** by verifying freshness (health tracking)
+- **Prune** what's stale (staleness detection)
+
+Engram is a TypeScript-native, storage-agnostic, event-sourced graph runtime. Five primitives:
+
+```typescript
+import { createRuntime } from '@engram-ai/core'
+import { MemoryAdapter } from '@engram-ai/adapter-memory'
+
+const storage = new MemoryAdapter()
+const runtime = createRuntime({ storage })
+const graph = await runtime.createGraph('customer-jane')
+
+// 1. Graph — what the agent knows
+const claim = await graph.addObject({
+  type: 'claim',
+  data: { policy: 'HO-3-12345', type: 'water_damage' }
+})
+
+// 2. Relations — how facts connect
+const evidence = await graph.addObject({
+  type: 'evidence',
+  data: { source: 'call_transcript', text: '...' }
+})
+await graph.addRelation(evidence.id, claim.id, 'supports')
+
+// 3. Causal chains — why things happened
+const chain = await graph.traceBackward(claim.createdByEventId)
+
+// 4. Decisions — what was chosen and what wasn't
+await graph.recordDecision({
+  selectedAction: 'approve_claim',
+  alternatives: [
+    { action: 'deny_claim', rejected: 'evidence supports coverage' }
+  ],
+  confidence: 0.92,
+  reasoning: 'Policy covers water damage'
+})
+
+// 5. Health — what's still accurate
+const stale = await graph.getStaleObjects({ thresholdDays: 30 })
+```
+
+That's it. Five primitives. No infrastructure to manage. `npm install` and go.
+
+## What's next
+
+Engram is open source under MIT. Right now it ships with an in-memory adapter (perfect for development and testing). SQLite and Postgres adapters are coming for production use.
+
+I'm using it in our own voice agents first. If it works for insurance — one of the most regulation-heavy, audit-obsessed industries out there — it'll work for anything.
+
+If you're building AI agents and you've hit the same wall I did, [give it a try](https://github.com/engramhq/engram). I'd love to hear what you think.

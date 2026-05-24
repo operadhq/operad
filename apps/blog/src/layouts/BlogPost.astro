@@ -1,0 +1,98 @@
+---
+import Base from './Base.astro'
+
+interface Props {
+  title: string
+  description: string
+  date: Date
+  author: string
+  tags: string[]
+}
+
+const { title, description, date, author, tags } = Astro.props
+
+const formattedDate = date.toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+})
+---
+
+<Base title={title} description={description}>
+  <article>
+    <header>
+      <div class="meta">
+        <time datetime={date.toISOString()}>{formattedDate}</time>
+        <span class="separator">·</span>
+        <span>{author}</span>
+      </div>
+      <h1>{title}</h1>
+      <p class="description">{description}</p>
+      {tags.length > 0 && (
+        <div class="tags">
+          {tags.map((tag) => (
+            <span class="tag">{tag}</span>
+          ))}
+        </div>
+      )}
+    </header>
+    <div class="content">
+      <slot />
+    </div>
+  </article>
+  <div class="post-footer">
+    <a href="/blog">← All posts</a>
+  </div>
+</Base>
+
+<style>
+  article header {
+    margin-bottom: 2.5rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+  .separator {
+    margin: 0 0.5rem;
+  }
+  h1 {
+    font-size: 2.2rem;
+    line-height: 1.2;
+    margin-bottom: 0.75rem;
+  }
+  .description {
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    line-height: 1.5;
+    margin-bottom: 1rem;
+  }
+  .tags {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .content {
+    font-size: 1.05rem;
+  }
+  .post-footer {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .post-footer a {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+</style>

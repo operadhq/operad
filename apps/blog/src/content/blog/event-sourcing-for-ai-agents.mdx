@@ -1,0 +1,184 @@
+---
+title: "Event Sourcing for AI Agents"
+description: "Why the pattern that powers banking systems and trading platforms is exactly what AI agents need for reliable memory."
+date: 2026-05-22
+author: "Charles Javelona"
+tags: ["event-sourcing", "architecture", "technical"]
+---
+
+Event sourcing isn't new. Banks have used it for decades — every transaction is an immutable event, and your account balance is a projection of all events up to now. Trading platforms, healthcare records, supply chain systems — anywhere you need a complete audit trail, event sourcing is the standard.
+
+AI agents need the same thing. Here's why.
+
+## The problem with mutable state
+
+Most agent frameworks store state mutably. When an agent learns something, it overwrites the previous value:
+
+```typescript
+// Mutable approach — what most frameworks do
+agent.memory.set('customer_phone', '555-0199')
+
+// Later, agent learns the phone changed
+agent.memory.set('customer_phone', '555-0200')
+
+// The old number is gone. Forever.
+```
+
+This seems fine until someone asks:
+
+- "What was the customer's phone number when we processed their claim in January?"
+- "Who changed the phone number, and why?"
+- "Has this phone number been verified recently, or is it stale?"
+
+Mutable state can't answer any of these questions. The history is destroyed on every write.
+
+## Event sourcing preserves everything
+
+With event sourcing, you never mutate state. You append events:
+
+```typescript
+// Event-sourced approach
+// Event 1: Phone number learned from intake call
+{ type: 'object.created', payload: { type: 'contact', data: { phone: '555-0199' } },
+  causedBy: 'evt_intake_call_jan15', timestamp: '2026-01-15T...' }
+
+// Event 2: Phone number updated from follow-up call
+{ type: 'object.patched', payload: { objectId: 'obj_123', patch: { phone: '555-0200' } },
+  causedBy: 'evt_followup_call_mar02', timestamp: '2026-03-02T...' }
+```
+
+Now you can answer all three questions:
+
+1. **January's number?** Replay events up to January → `555-0199`
+2. **Who changed it?** Follow `causedBy` → `evt_followup_call_mar02` → the March follow-up call
+3. **Is it fresh?** Check the health record → last verified March 2, that's within 90 days
+
+Nothing is lost. Every state change is a first-class record.
+
+## Causal chains are the killer feature
+
+The `causedBy` field on every event creates a causal graph. This is more powerful than a simple log because it captures *why* things happened, not just *what* happened.
+
+Consider this chain:
+
+```
+graph.created (agent session started)
+  └─ object.created (claim filed)
+       └─ object.created (evidence extracted from transcript)
+            └─ relation.created (evidence → supports → claim)
+                 └─ decision.recorded (approve_claim, confidence: 0.92)
+                      └─ behavior.triggered (auto-notify-adjuster)
+                           └─ custom.notification_sent
+```
+
+Reading bottom-up: a notification was sent *because* a behavior was triggered, *because* a decision was made, *because* evidence was linked to a claim, *because* evidence was extracted, *because* a claim was filed, *because* an agent session started.
+
+That's not a log. That's a provenance graph. It's exactly what PROV-AGENT (IEEE 2025) describes as necessary for trustworthy autonomous agents.
+
+## Behaviors make it reactive
+
+Static event logs are useful for audits but not for real-time agent behavior. You need a way for the system to *react* to events as they happen.
+
+In Engram, behaviors subscribe to event types:
+
+```typescript
+import { behavior } from '@engram-ai/core'
+
+const cascadeInvalidation = behavior({
+  name: 'cascade-invalidation',
+  on: ['object.removed'],
+  handler: async (event, graph, ctx) => {
+    // When an object is removed, find and remove all its relations
+    const relations = await graph.queryRelations({
+      sourceId: event.payload.objectId
+    })
+    for (const rel of relations) {
+      await graph.removeRelation(rel.id)
+    }
+  }
+})
+```
+
+When an object is removed, `cascade-invalidation` fires automatically, cleaning up dangling relations. Each removal emits its own event, which could trigger other behaviors. The system is reactive — events cascade through behaviors, creating causal chains.
+
+This is the same pattern as Erlang's supervision trees: errors are events, and the system self-heals by reacting to them.
+
+```typescript
+const retryOnFailure = behavior({
+  name: 'retry-on-api-failure',
+  on: ['behavior.failed'],
+  where: { 'payload.reason': 'API timeout' },
+  handler: async (event, graph, ctx) => {
+    await ctx.emit({
+      type: 'custom.retry_scheduled',
+      payload: {
+        originalBehavior: event.payload.behaviorName,
+        attempt: 2
+      }
+    })
+  }
+})
+```
+
+A behavior watches for failures. When one happens with a matching reason, it schedules a retry. The retry is itself an event, fully traced in the causal chain.
+
+## Why not just use a database?
+
+You could store events in Postgres yourself. But then you're building:
+
+- Causal chain resolution (walking `caused_by` links backward and forward)
+- Behavior matching (which handlers fire for which events, with where-clause filtering)
+- Health tracking (staleness detection, verification timestamps, success rates)
+- Decision recording (selected action + rejected alternatives)
+- The event loop itself (emit → match → fire → emit)
+
+That's not "using a database." That's building a framework. Engram gives you the framework, and you choose the database:
+
+```typescript
+import { MemoryAdapter } from '@engram-ai/adapter-memory'    // dev/testing
+// import { SQLiteAdapter } from '@engram-ai/adapter-sqlite'  // lightweight prod
+// import { PostgresAdapter } from '@engram-ai/adapter-postgres' // full prod
+```
+
+Same code, different storage. The adapter handles persistence; the runtime handles the event loop.
+
+## The brain analogy
+
+There's a reason we named this Engram. The brain doesn't store memories as mutable records. It stores them as patterns of neural activation that are:
+
+- **Encoded** during experience (events are appended)
+- **Replayed** during recall and sleep (causal chains are traced)
+- **Consolidated** over time (health tracking verifies freshness)
+- **Pruned** when no longer useful (staleness detection flags decay)
+
+Event sourcing mirrors this biological process. Your agent's memory isn't a database — it's a living, traceable, self-correcting record of everything the agent has experienced and decided.
+
+## Try it
+
+```bash
+npm install @engram-ai/core @engram-ai/adapter-memory
+```
+
+```typescript
+import { createRuntime, behavior } from '@engram-ai/core'
+import { MemoryAdapter } from '@engram-ai/adapter-memory'
+
+const runtime = createRuntime({
+  storage: new MemoryAdapter(),
+  behaviors: [
+    behavior({
+      name: 'log-decisions',
+      on: ['decision.recorded'],
+      handler: async (event) => {
+        console.log(`Decision: ${event.payload.selectedAction}`)
+      }
+    })
+  ]
+})
+
+const graph = await runtime.createGraph('my-agent')
+```
+
+That's a complete event-sourced agent memory system in 15 lines.
+
+[GitHub](https://github.com/engramhq/engram) · [Full docs](https://github.com/engramhq/engram#readme)
