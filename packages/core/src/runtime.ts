@@ -12,7 +12,7 @@ import { Graph } from './graph.js'
 import { BehaviorRegistry } from './behavior.js'
 
 /**
- * The Runtime is the event loop of Engram:
+ * The Runtime is the event loop of Operad:
  *   emit event → match behaviors → execute handlers → emit new events → repeat
  *
  * Like a neural network: events fire, triggering downstream behaviors

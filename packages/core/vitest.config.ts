@@ -7,7 +7,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@engram-ai/adapter-memory': path.resolve(__dirname, '../adapter-memory/src/index.ts'),
+      '@operad/adapter-memory': path.resolve(__dirname, '../adapter-memory/src/index.ts'),
     },
   },
 })

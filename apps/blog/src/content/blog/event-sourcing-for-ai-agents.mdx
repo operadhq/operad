@@ -79,10 +79,10 @@ That's not a log. That's a provenance graph. It's exactly what PROV-AGENT (IEEE 
 
 Static event logs are useful for audits but not for real-time agent behavior. You need a way for the system to *react* to events as they happen.
 
-In Engram, behaviors subscribe to event types:
+In Operad, behaviors subscribe to event types:
 
 ```typescript
-import { behavior } from '@engram-ai/core'
+import { behavior } from '@operad/core'
 
 const cascadeInvalidation = behavior({
   name: 'cascade-invalidation',
@@ -132,36 +132,36 @@ You could store events in Postgres yourself. But then you're building:
 - Decision recording (selected action + rejected alternatives)
 - The event loop itself (emit → match → fire → emit)
 
-That's not "using a database." That's building a framework. Engram gives you the framework, and you choose the database:
+That's not "using a database." That's building a framework. Operad gives you the framework, and you choose the database:
 
 ```typescript
-import { MemoryAdapter } from '@engram-ai/adapter-memory'    // dev/testing
-// import { SQLiteAdapter } from '@engram-ai/adapter-sqlite'  // lightweight prod
-// import { PostgresAdapter } from '@engram-ai/adapter-postgres' // full prod
+import { MemoryAdapter } from '@operad/adapter-memory'    // dev/testing
+// import { SQLiteAdapter } from '@operad/adapter-sqlite'  // lightweight prod
+// import { PostgresAdapter } from '@operad/adapter-postgres' // full prod
 ```
 
 Same code, different storage. The adapter handles persistence; the runtime handles the event loop.
 
-## The brain analogy
+## The composition analogy
 
-There's a reason we named this Engram. The brain doesn't store memories as mutable records. It stores them as patterns of neural activation that are:
+There's a reason we named this Operad. In category theory, an operad is a structure for composing operations — small pieces combine into larger, coherent wholes. Agent memory works the same way:
 
-- **Encoded** during experience (events are appended)
-- **Replayed** during recall and sleep (causal chains are traced)
-- **Consolidated** over time (health tracking verifies freshness)
-- **Pruned** when no longer useful (staleness detection flags decay)
+- **Events compose** into causal chains (append-only, traceable)
+- **Facts compose** into knowledge graphs (objects + relations)
+- **Behaviors compose** into reactive systems (event → handler → new event)
+- **Health composes** over time (verification timestamps, freshness tracking)
 
-Event sourcing mirrors this biological process. Your agent's memory isn't a database — it's a living, traceable, self-correcting record of everything the agent has experienced and decided.
+Your agent's memory isn't a database — it's a living, traceable, self-correcting record of everything the agent has experienced and decided.
 
 ## Try it
 
 ```bash
-npm install @engram-ai/core @engram-ai/adapter-memory
+npm install @operad/core @operad/adapter-memory
 ```
 
 ```typescript
-import { createRuntime, behavior } from '@engram-ai/core'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { createRuntime, behavior } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 const runtime = createRuntime({
   storage: new MemoryAdapter(),
@@ -181,4 +181,4 @@ const graph = await runtime.createGraph('my-agent')
 
 That's a complete event-sourced agent memory system in 15 lines.
 
-[GitHub](https://github.com/engramhq/engram) · [Full docs](https://github.com/engramhq/engram#readme)
+[GitHub](https://github.com/operadhq/operad) · [Full docs](https://github.com/operadhq/operad#readme)

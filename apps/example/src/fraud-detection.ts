@@ -1,11 +1,11 @@
 /**
- * Engram Example: Fraud Detection Agent
+ * Operad Example: Fraud Detection Agent
  *
  * Inspired by: "We deployed AI agents to detect fraud at one of the
  * largest banks in the US. Claude is a 10x fraud analyst — while still
  * making mistakes every entry-level analyst knows to avoid."
  *
- * This demo shows how Engram solves the 3 core problems:
+ * This demo shows how Operad solves the 3 core problems:
  *   1. No institutional memory → Graph baselines
  *   2. No case coordination → Shared graph state
  *   3. No decision accountability → Decision records + compliance behaviors
@@ -13,8 +13,8 @@
  * Run: pnpm demo:fraud
  */
 
-import { createRuntime, behavior } from '@engram-ai/core'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { createRuntime, behavior } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 // ─── Compliance Behavior ──────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ const deduplicateInvestigations = behavior({
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n◆ Engram — Fraud Detection Demo\n')
+  console.log('\n◆ Operad — Fraud Detection Demo\n')
   console.log('─'.repeat(55))
 
   const storage = new MemoryAdapter()
@@ -90,8 +90,8 @@ async function main() {
   // ── Problem 1: Institutional Memory ─────────────────────────────────
 
   console.log('\n── Problem 1: Institutional Memory ─────────────')
-  console.log('  Without Engram: Agent flags every large wire as fraud')
-  console.log('  With Engram: Agent checks organizational baselines first\n')
+  console.log('  Without Operad: Agent flags every large wire as fraud')
+  console.log('  With Operad: Agent checks organizational baselines first\n')
 
   // Store institutional knowledge — what's NORMAL for this bank
   await graph.addObject({
@@ -135,8 +135,8 @@ async function main() {
   // ── Problem 2: Case Coordination ────────────────────────────────────
 
   console.log('\n── Problem 2: Case Coordination ────────────────')
-  console.log('  Without Engram: Two agents investigate the same case independently')
-  console.log('  With Engram: Shared graph prevents duplicate work\n')
+  console.log('  Without Operad: Two agents investigate the same case independently')
+  console.log('  With Operad: Shared graph prevents duplicate work\n')
 
   // Agent A starts investigating
   await graph.addObject({
@@ -170,8 +170,8 @@ async function main() {
   // ── Problem 3: Decision Accountability ──────────────────────────────
 
   console.log('\n── Problem 3: Decision Accountability ──────────')
-  console.log('  Without Engram: No record of WHY agent flagged a transaction')
-  console.log('  With Engram: Every decision recorded with full reasoning\n')
+  console.log('  Without Operad: No record of WHY agent flagged a transaction')
+  console.log('  With Operad: Every decision recorded with full reasoning\n')
 
   // Good decision — passes compliance
   console.log('  Decision 1: Flag based on transaction patterns')

@@ -1,5 +1,5 @@
 {
-  "name": "@engram-ai/example",
+  "name": "@operad/example",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -8,8 +8,8 @@
     "demo:fraud": "tsx src/fraud-detection.ts"
   },
   "dependencies": {
-    "@engram-ai/core": "workspace:*",
-    "@engram-ai/adapter-memory": "workspace:*"
+    "@operad/core": "workspace:*",
+    "@operad/adapter-memory": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0"

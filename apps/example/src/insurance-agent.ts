@@ -1,5 +1,5 @@
 /**
- * Engram Example: Insurance Voice Agent
+ * Operad Example: Insurance Voice Agent
  *
  * Simulates an AI voice agent processing a water damage claim.
  * Shows all 5 primitives: graph, events, behaviors, decisions, health.
@@ -7,8 +7,8 @@
  * Run: pnpm demo
  */
 
-import { createRuntime, behavior } from '@engram-ai/core'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { createRuntime, behavior } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 // ─── Behaviors ────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ const auditDecisions = behavior({
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n◆ Engram — Insurance Agent Demo\n')
+  console.log('\n◆ Operad — Insurance Agent Demo\n')
   console.log('─'.repeat(50))
 
   // 1. Set up runtime with behaviors

@@ -1,9 +1,9 @@
 ---
-title: "Why I Built Engram"
+title: "Why I Built Operad"
 description: "I was building AI voice agents for insurance agencies. Then I hit a wall that no TypeScript library could solve."
 date: 2026-05-23
 author: "Charles Javelona"
-tags: ["engram", "open-source", "origin-story"]
+tags: ["operad", "open-source", "origin-story"]
 ---
 
 I've been building AI voice agents for insurance agencies. Our agents pick up the phone, talk to customers, collect intake information, process claims. Real calls, real people, real stakes.
@@ -50,9 +50,9 @@ Then I found [ActiveGraph](https://github.com/SynapticSage/ActiveGraph), a Pytho
 
 But ActiveGraph is Python-only. My agents run on TypeScript. Most production AI agents run on TypeScript — Vercel AI SDK, LangChain.js, the entire serverless ecosystem. There was nothing like this for the TS world.
 
-## So I built Engram
+## So I built Operad
 
-The name comes from neuroscience. An **engram** is the physical trace of a memory in the brain — a neural assembly that encodes an experience. Engrams are formed during experience, replayed during recall, consolidated over time, and pruned when no longer relevant.
+The name comes from mathematics. An **operad** is a structure in category theory for composing operations — small pieces combine into larger, coherent wholes. In Operad, events compose into causal chains, facts compose into knowledge graphs, and behaviors compose into reactive systems.
 
 That's exactly what an agent memory system should do:
 
@@ -61,11 +61,11 @@ That's exactly what an agent memory system should do:
 - **Consolidate** by verifying freshness (health tracking)
 - **Prune** what's stale (staleness detection)
 
-Engram is a TypeScript-native, storage-agnostic, event-sourced graph runtime. Five primitives:
+Operad is a TypeScript-native, storage-agnostic, event-sourced graph runtime. Five primitives:
 
 ```typescript
-import { createRuntime } from '@engram-ai/core'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { createRuntime } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 const storage = new MemoryAdapter()
 const runtime = createRuntime({ storage })
@@ -105,8 +105,8 @@ That's it. Five primitives. No infrastructure to manage. `npm install` and go.
 
 ## What's next
 
-Engram is open source under MIT. Right now it ships with an in-memory adapter (perfect for development and testing). SQLite and Postgres adapters are coming for production use.
+Operad is open source under MIT. Right now it ships with an in-memory adapter (perfect for development and testing). SQLite and Postgres adapters are coming for production use.
 
 I'm using it in our own voice agents first. If it works for insurance — one of the most regulation-heavy, audit-obsessed industries out there — it'll work for anything.
 
-If you're building AI agents and you've hit the same wall I did, [give it a try](https://github.com/engramhq/engram). I'd love to hear what you think.
+If you're building AI agents and you've hit the same wall I did, [give it a try](https://github.com/operadhq/operad). I'd love to hear what you think.

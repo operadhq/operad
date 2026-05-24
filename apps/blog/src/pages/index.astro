@@ -7,13 +7,13 @@ const posts = (await getCollection('blog'))
   .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
 ---
 
-<Base title="Engram">
+<Base title="Operad">
   <div class="hero">
-    <h1>Engram</h1>
+    <h1>Operad</h1>
     <p class="tagline">Event-sourced graph runtime for AI agents.</p>
     <p class="sub">Every mutation is an event. Every event has a cause. Every decision is recorded.</p>
     <div class="cta">
-      <code>npm install @engram-ai/core @engram-ai/adapter-memory</code>
+      <code>npm install @operad/core @operad/adapter-memory</code>
     </div>
   </div>
 

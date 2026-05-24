@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createRuntime, behavior } from '../src/index.js'
 import type { Runtime } from '../src/types.js'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 describe('Runtime', () => {
   let storage: MemoryAdapter

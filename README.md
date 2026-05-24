@@ -1,4 +1,4 @@
-# Engram
+# Operad
 
 **Event-sourced graph runtime for AI agents.**
 
@@ -6,18 +6,18 @@ Every mutation is an event. Every event has a cause. Every decision is recorded.
 Your agent remembers, explains, and self-corrects.
 
 ```
-npm install @engram-ai/core @engram-ai/adapter-memory
+npm install @operad/core @operad/adapter-memory
 ```
 
 ---
 
-## Why Engram exists
+## Why Operad exists
 
 AI agents today are stateless. They process a prompt, produce an output, and forget everything. If you ask an agent *why* it made a decision, it can't tell you. If it learns something important mid-conversation, that knowledge dies when the session ends.
 
 This is a real problem. Insurance adjusters need audit trails. Healthcare agents need provenance. Compliance teams need to trace every automated decision back to its source. And developers building multi-step agents need their bots to *remember* what happened three steps ago — and react when something goes wrong.
 
-We built Engram because we were building AI voice agents for insurance agencies and hit this wall ourselves. Our agents needed to:
+We built Operad because we were building AI voice agents for insurance agencies and hit this wall ourselves. Our agents needed to:
 
 - Remember facts across conversations (a customer's policy type, their claim history)
 - Explain why they approved or denied a claim (full causal chain, not a vague summary)
@@ -28,27 +28,27 @@ No TypeScript library did all of this. So we built one.
 
 ## Inspiration
 
-Engram is inspired by [ActiveGraph](https://github.com/SynapticSage/ActiveGraph) — a Python library that proves the pattern of event-sourced knowledge graphs for agent state. ActiveGraph showed that treating agent memory as a graph with causal event chains is the right abstraction. Engram brings this pattern to the TypeScript ecosystem, where most production AI agents actually run.
+Operad is inspired by [ActiveGraph](https://github.com/SynapticSage/ActiveGraph) — a Python library that proves the pattern of event-sourced knowledge graphs for agent state. ActiveGraph showed that treating agent memory as a graph with causal event chains is the right abstraction. Operad brings this pattern to the TypeScript ecosystem, where most production AI agents actually run.
 
-The name comes from neuroscience. An **engram** is a neural assembly that encodes a memory — the physical trace of an experience in the brain. Engrams are formed during experience, replayed during recall, consolidated during sleep, and pruned when no longer relevant. Engram (the library) works the same way: objects are created during agent runs, traced during audits, verified for freshness, and flagged when stale.
+The name comes from mathematics. An **operad** is a structure in category theory for composing operations — small pieces combine into larger, coherent wholes. Agent memory works the same way: events compose into causal chains, facts compose into knowledge graphs, and behaviors compose into reactive systems. Operad (the library) embodies this: objects are created during agent runs, composed through relations, traced during audits, verified for freshness, and flagged when stale.
 
 We also drew from academic work on agent provenance:
 - **PROV-AGENT** (IEEE 2025) — formalizing provenance tracking for autonomous agents
 - **Oracle Reasoning Provenance** (2026) — causal chain verification for AI decision-making
 
-And from the market: [Mem0](https://mem0.ai) raised $24M proving that agent memory is a real product category. Engram is the open-source, TypeScript-native alternative — no vendor lock-in, no cloud dependency, runs anywhere Node.js runs.
+And from the market: [Mem0](https://mem0.ai) raised $24M proving that agent memory is a real product category. Operad is the open-source, TypeScript-native alternative — no vendor lock-in, no cloud dependency, runs anywhere Node.js runs.
 
 ## Core concepts
 
-Engram has 5 primitives. Together they give your agent persistent memory with full provenance.
+Operad has 5 primitives. Together they give your agent persistent memory with full provenance.
 
 ### 1. Graph — what the agent knows
 
 A graph holds **objects** (nodes) and **relations** (typed edges). Think of it as the agent's working memory.
 
 ```typescript
-import { createRuntime } from '@engram-ai/core'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { createRuntime } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 const storage = new MemoryAdapter()
 const runtime = createRuntime({ storage })
@@ -95,7 +95,7 @@ This is the audit trail. When a regulator asks "why did the AI approve this clai
 Behaviors are functions that subscribe to event types. When a matching event is emitted, the behavior fires. Behaviors can mutate the graph and emit new events, creating reactive chains.
 
 ```typescript
-import { behavior } from '@engram-ai/core'
+import { behavior } from '@operad/core'
 
 const autoTag = behavior({
   name: 'auto-tag-high-value',
@@ -138,7 +138,7 @@ const retryOnFailure = behavior({
 
 ### 4. Decisions — what was chosen and what was rejected
 
-Agents make choices. Engram records not just what was selected, but what alternatives were considered and why they were rejected. This is critical for explainability.
+Agents make choices. Operad records not just what was selected, but what alternatives were considered and why they were rejected. This is critical for explainability.
 
 ```typescript
 await graph.recordDecision({
@@ -157,7 +157,7 @@ const highConfidence = await graph.queryDecisions({ minConfidence: 0.9 })
 
 ### 5. Health — what's still accurate
 
-Facts go stale. A phone number from 6 months ago might be wrong. A policy might have been renewed with different terms. Engram tracks when objects were last verified and flags stale ones.
+Facts go stale. A phone number from 6 months ago might be wrong. A policy might have been renewed with different terms. Operad tracks when objects were last verified and flags stale ones.
 
 ```typescript
 // Find objects not verified in the last 30 days
@@ -171,7 +171,7 @@ const stale = await graph.getStaleObjects({ thresholdDays: 30 })
 
 ### AI agents that need memory across sessions
 
-LangChain and Vercel AI SDK give you tool-calling and streaming. But when the session ends, the agent forgets everything. Engram is the persistent memory layer:
+LangChain and Vercel AI SDK give you tool-calling and streaming. But when the session ends, the agent forgets everything. Operad is the persistent memory layer:
 
 ```typescript
 // Session 1: Agent learns about customer
@@ -215,7 +215,7 @@ Every step is traced. You can see exactly where a workflow failed, what retry st
 
 ### Knowledge graphs that stay fresh
 
-CRMs, documentation systems, inventory trackers — any system where facts have a shelf life. Engram's health tracking surfaces stale data so your agent (or your team) can re-verify it.
+CRMs, documentation systems, inventory trackers — any system where facts have a shelf life. Operad's health tracking surfaces stale data so your agent (or your team) can re-verify it.
 
 ## Architecture
 
@@ -255,20 +255,20 @@ CRMs, documentation systems, inventory trackers — any system where facts have 
 
 ## Storage adapters
 
-Engram is storage-agnostic. The `StorageAdapter` interface abstracts all persistence. Ship with the adapter that fits your use case:
+Operad is storage-agnostic. The `StorageAdapter` interface abstracts all persistence. Ship with the adapter that fits your use case:
 
 | Adapter | Package | Best for |
 |---------|---------|----------|
-| In-memory | `@engram-ai/adapter-memory` | Development, testing, short-lived processes |
-| SQLite | `@engram-ai/adapter-sqlite` *(coming soon)* | Single-server production, edge functions |
-| Postgres | `@engram-ai/adapter-postgres` *(coming soon)* | Multi-server production, cloud deployments |
+| In-memory | `@operad/adapter-memory` | Development, testing, short-lived processes |
+| SQLite | `@operad/adapter-sqlite` *(coming soon)* | Single-server production, edge functions |
+| Postgres | `@operad/adapter-postgres` *(coming soon)* | Multi-server production, cloud deployments |
 
 ### Writing a custom adapter
 
 Implement the `StorageAdapter` interface to plug in any backend — Redis, DynamoDB, Turso, whatever you need:
 
 ```typescript
-import type { StorageAdapter } from '@engram-ai/core'
+import type { StorageAdapter } from '@operad/core'
 
 export class MyCustomAdapter implements StorageAdapter {
   async addObject(graphId, obj, eventId) { /* ... */ }
@@ -342,7 +342,7 @@ const myBehavior = behavior({
 
 ## Comparison
 
-| Feature | Engram | LangChain Memory | Mem0 | Neo4j |
+| Feature | Operad | LangChain Memory | Mem0 | Neo4j |
 |---------|--------|-----------------|------|-------|
 | TypeScript-native | Yes | Python-first | Python-first | Java |
 | Event sourcing | Yes | No | No | No |
@@ -371,8 +371,8 @@ pnpm test
 
 | Package | Description |
 |---------|-------------|
-| [`@engram-ai/core`](./packages/core) | Runtime, graph, event log, behaviors, decisions, health |
-| [`@engram-ai/adapter-memory`](./packages/adapter-memory) | In-memory storage adapter for dev/testing |
+| [`@operad/core`](./packages/core) | Runtime, graph, event log, behaviors, decisions, health |
+| [`@operad/adapter-memory`](./packages/adapter-memory) | In-memory storage adapter for dev/testing |
 
 ## Contributing
 

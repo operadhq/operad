@@ -35,10 +35,10 @@ importers:
 
   apps/example:
     dependencies:
-      '@engram-ai/adapter-memory':
+      '@operad/adapter-memory':
         specifier: workspace:*
         version: link:../../packages/adapter-memory
-      '@engram-ai/core':
+      '@operad/core':
         specifier: workspace:*
         version: link:../../packages/core
     devDependencies:
@@ -48,11 +48,11 @@ importers:
 
   packages/adapter-memory:
     dependencies:
-      '@engram-ai/core':
+      '@operad/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@engram-ai/tsconfig':
+      '@operad/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       tsup:
@@ -67,7 +67,7 @@ importers:
 
   packages/core:
     devDependencies:
-      '@engram-ai/tsconfig':
+      '@operad/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       tsup:

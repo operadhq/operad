@@ -15,7 +15,7 @@ import type {
   HealthRecord,
   HealthUpdate,
   JsonValue,
-} from '@engram-ai/core'
+} from '@operad/core'
 
 let idCounter = 0
 function genId(prefix: string): string {

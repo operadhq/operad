@@ -145,18 +145,18 @@ const stale = await graph.getStaleObjects({ thresholdDays: 30 })
 // Your agent can re-verify them or flag them for human review
 ```
 
-## This is Engram
+## This is Operad
 
-We built [Engram](https://github.com/engramhq/engram) to solve exactly this problem. It's a TypeScript-native, event-sourced graph runtime that gives AI agents all five primitives in a single `npm install`:
+We built [Operad](https://github.com/operadhq/operad) to solve exactly this problem. It's a TypeScript-native, event-sourced graph runtime that gives AI agents all five primitives in a single `npm install`:
 
 ```bash
-npm install @engram-ai/core @engram-ai/adapter-memory
+npm install @operad/core @operad/adapter-memory
 ```
 
 It's open source (MIT), storage-agnostic (bring your own database), and designed to embed directly into any Node.js application. No separate server, no cloud dependency, no vendor lock-in.
 
-The name comes from neuroscience — an engram is the physical trace of a memory in the brain. Just like biological engrams, Engram forms memories during experience, replays them during recall, verifies them for accuracy, and flags what's gone stale.
+The name comes from mathematics — an operad is a category theory structure for composing operations into larger wholes. Operad (the library) composes events into causal chains, facts into knowledge graphs, and behaviors into reactive systems — then traces, verifies, and prunes them over time.
 
-If you're building AI agents that need to remember, explain, and self-correct, [check it out](https://github.com/engramhq/engram).
+If you're building AI agents that need to remember, explain, and self-correct, [check it out](https://github.com/operadhq/operad).
 
 The agent memory problem is solvable. We just need the right abstractions.

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createRuntime } from '../src/runtime.js'
 import type { GraphAPI, Runtime } from '../src/types.js'
-import { MemoryAdapter } from '@engram-ai/adapter-memory'
+import { MemoryAdapter } from '@operad/adapter-memory'
 
 describe('Graph', () => {
   let runtime: Runtime

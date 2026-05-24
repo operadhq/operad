@@ -1,5 +1,5 @@
 {
-  "name": "@engram-ai/core",
+  "name": "@operad/core",
   "version": "0.1.0",
   "description": "Event-sourced graph runtime for AI agents",
   "type": "module",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@engram-ai/tsconfig": "workspace:*",
+    "@operad/tsconfig": "workspace:*",
     "typescript": "^5.7.0",
     "tsup": "^8.3.0",
     "vitest": "^2.1.0"
