@@ -1,0 +1,17 @@
+{
+  "name": "@engram-ai/example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "tsx src/insurance-agent.ts",
+    "demo:fraud": "tsx src/fraud-detection.ts"
+  },
+  "dependencies": {
+    "@engram-ai/core": "workspace:*",
+    "@engram-ai/adapter-memory": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}

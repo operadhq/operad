@@ -126,6 +126,7 @@ export class Graph implements GraphAPI {
       payload: {
         selectedAction: input.selectedAction,
         confidence: input.confidence,
+        reasoning: input.reasoning,
       },
     })
     return this.storage.recordDecision(this.id, event.id, input)
