@@ -1,5 +1,11 @@
 # Run locally: docker compose up
-# This gives you Operad + Postgres in one command.
+# This gives you the full Operad stack in one command.
+#
+# Services:
+#   postgres  — Event store + graph persistence
+#   redis     — Event bus for async behavior processing
+#   operad    — REST API server (HTTP interface)
+#   worker    — Background behavior processor (consumes events from Redis)
 
 services:
   postgres:
@@ -18,6 +24,18 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   operad:
     build:
       context: ../../
@@ -28,9 +46,28 @@ services:
       PORT: 3111
       ADAPTER: postgres
       DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+      REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../../
+      dockerfile: packages/server/Dockerfile
+    command: ["node", "packages/server/dist/worker.js"]
+    environment:
+      ADAPTER: postgres
+      DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
   pgdata:
+  redisdata:

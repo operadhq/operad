@@ -7,7 +7,8 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "operad-server": "./dist/cli.js"
+    "operad-server": "./dist/cli.js",
+    "operad-worker": "./dist/worker.js"
   },
   "exports": {
     ".": {
@@ -47,7 +48,8 @@
     "@operad/adapter-memory": "workspace:*",
     "@operad/adapter-postgres": "workspace:*",
     "@operad/core": "workspace:*",
-    "hono": "^4.6.0"
+    "hono": "^4.6.0",
+    "ioredis": "^5.4.0"
   },
   "devDependencies": {
     "@operad/tsconfig": "workspace:*",
