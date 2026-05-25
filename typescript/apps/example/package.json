@@ -10,7 +10,8 @@
     "demo:carrier": "tsx src/carrier-routing.ts",
     "demo:appetite": "tsx src/carrier-appetite.ts",
     "demo:primitives": "tsx src/primitives-demo.ts",
-    "demo:session": "tsx src/call-session-demo.ts"
+    "demo:session": "tsx src/call-session-demo.ts",
+    "demo:coding": "tsx src/coding-session-demo.ts"
   },
   "dependencies": {
     "@operad/core": "workspace:*",
