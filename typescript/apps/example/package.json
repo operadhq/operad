@@ -8,7 +8,8 @@
     "demo:fraud": "tsx src/fraud-detection.ts",
     "demo:onboarding": "tsx src/agent-onboarding.ts",
     "demo:carrier": "tsx src/carrier-routing.ts",
-    "demo:appetite": "tsx src/carrier-appetite.ts"
+    "demo:appetite": "tsx src/carrier-appetite.ts",
+    "demo:primitives": "tsx src/primitives-demo.ts"
   },
   "dependencies": {
     "@operad/core": "workspace:*",

@@ -28,6 +28,18 @@ export type {
   Runtime,
   RuntimeOptions,
   StorageAdapter,
+  // New types
+  RelationBehaviorHandler,
+  RelationBehaviorDef,
+  ViewSpec,
+  GraphView,
+  PatternMatch,
+  PatchStatus,
+  PatchProposal,
+  ProposeInput,
+  ForkOptions,
+  LLMProvider,
+  LLMBehaviorDef,
 } from './types.js'
 
 // Runtime
@@ -38,6 +50,22 @@ export { Graph } from './graph.js'
 
 // Behavior
 export { behavior, matchesWhere, BehaviorRegistry } from './behavior.js'
+
+// Relation Behavior
+export { relationBehavior } from './relation-behavior.js'
+
+// View
+export { GraphViewImpl, resolveView } from './view.js'
+
+// Pattern Matching
+export { parsePattern, matchPattern } from './pattern.js'
+export type { ParsedPattern } from './pattern.js'
+
+// Patches + Policies
+export { PatchRegistry } from './patch.js'
+
+// LLM Behavior
+export { llmBehavior } from './llm-behavior.js'
 
 // Event Log
 export { EventLog } from './event-log.js'

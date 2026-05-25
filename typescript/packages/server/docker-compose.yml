@@ -1,11 +1,30 @@
-# Run locally: docker compose up
-# This gives you the full Operad stack in one command.
+# Operad — Self-hosted stack
 #
-# Services:
-#   postgres  — Event store + graph persistence
-#   redis     — Event bus for async behavior processing
-#   operad    — REST API server (HTTP interface)
-#   worker    — Background behavior processor (consumes events from Redis)
+# Quick start:  docker compose up
+# Minimal:      docker compose up postgres redis operad worker
+#
+# ┌─────────────────────────────────────────────────────────┐
+# │ Core (required)                                         │
+# │   postgres   — Event store + graph persistence          │
+# │   redis      — Event bus for async behavior processing  │
+# │   operad     — REST API server                          │
+# │   worker     — Background behavior processor            │
+# │                                                         │
+# │ Production (optional, but recommended)                  │
+# │   scheduler  — Durable job queue (delayed behaviors,    │
+# │                snapshots, cleanup). Like Oban/Sidekiq.  │
+# │   webhooks   — Delivers graph events to external URLs   │
+# │                with retries + HMAC signatures.          │
+# │   dashboard  — Admin UI for inspecting graphs, events,  │
+# │                and system health.                       │
+# └─────────────────────────────────────────────────────────┘
+#
+# Cloud alternative: npm install @operad/cloud
+#   → Same SDK, zero infrastructure. https://operad.dev
+
+# ──────────────────────────────────────────────
+# Core services — required for Operad to function
+# ──────────────────────────────────────────────
 
 services:
   postgres:
@@ -30,6 +49,7 @@ services:
       - "6379:6379"
     volumes:
       - redisdata:/data
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -67,6 +87,73 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # ──────────────────────────────────────────────
+  # Production services — optional but recommended
+  # ──────────────────────────────────────────────
+  #
+  # These handle concerns that don't matter during development
+  # but become critical in production: scheduled jobs, external
+  # integrations, and observability.
+  #
+  # Start without them: docker compose up postgres redis operad worker
+
+  scheduler:
+    build:
+      context: ../../
+      dockerfile: packages/server/Dockerfile
+    command: ["node", "packages/server/dist/scheduler.js"]
+    environment:
+      ADAPTER: postgres
+      DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+      REDIS_URL: redis://redis:6379
+      POLL_INTERVAL_MS: 1000
+      MAX_CONCURRENCY: 10
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - production
+
+  webhooks:
+    build:
+      context: ../../
+      dockerfile: packages/server/Dockerfile
+    command: ["node", "packages/server/dist/webhooks.js"]
+    environment:
+      DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+      REDIS_URL: redis://redis:6379
+      MAX_RETRIES: 5
+      DELIVERY_TIMEOUT: 10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - production
+
+  dashboard:
+    build:
+      context: ../../
+      dockerfile: packages/server/Dockerfile
+    command: ["node", "packages/server/dist/dashboard.js"]
+    ports:
+      - "3112:3112"
+    environment:
+      DATABASE_URL: postgres://operad:operad@postgres:5432/operad
+      REDIS_URL: redis://redis:6379
+      DASHBOARD_PORT: 3112
+      # AUTH_TOKEN: set-a-secure-token-here
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - production
 
 volumes:
   pgdata:

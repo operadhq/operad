@@ -7,9 +7,15 @@ import type {
   GraphEvent,
   BehaviorDef,
   BehaviorContext,
+  ForkOptions,
+  PatchProposal,
+  ProposeInput,
 } from './types.js'
 import { Graph } from './graph.js'
 import { BehaviorRegistry } from './behavior.js'
+import { resolveView } from './view.js'
+import { parsePattern, matchPattern } from './pattern.js'
+import { PatchRegistry } from './patch.js'
 
 /**
  * The Runtime is the event loop of Operad:
@@ -22,6 +28,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
   const { storage } = options
   const registry = new BehaviorRegistry()
   const graphs = new Map<string, Graph>()
+  const patches = new PatchRegistry()
 
   // Register initial behaviors
   for (const def of options.behaviors ?? []) {
@@ -30,7 +37,9 @@ export function createRuntime(options: RuntimeOptions): Runtime {
 
   // Core emit function — this is the event loop
   async function emit(graphId: string, input: EventInput): Promise<GraphEvent> {
-    const event = await storage.appendEvent(graphId, input)
+    // Auto-set actor if not explicitly provided
+    const enrichedInput = input.actor ? input : { ...input, actor: input.actor ?? 'user' }
+    const event = await storage.appendEvent(graphId, enrichedInput)
 
     // Find matching behaviors
     const matched = registry.match(event)
@@ -44,7 +53,35 @@ export function createRuntime(options: RuntimeOptions): Runtime {
           emit(graphId, {
             ...behaviorInput,
             causedBy: event.id,
+            actor: behaviorInput.actor ?? def.name,
           }),
+        propose: async (input: ProposeInput) => {
+          const proposal = patches.add({
+            graphId,
+            objectType: input.type,
+            data: input.data,
+            reason: input.reason ?? '',
+            proposedBy: def.name,
+          })
+          await emit(graphId, {
+            type: 'patch.proposed',
+            payload: { patchId: proposal.id, objectType: input.type, proposedBy: def.name },
+            causedBy: event.id,
+            actor: def.name,
+          })
+          return proposal
+        },
+      }
+
+      // Resolve view if specified
+      if (def.view) {
+        ctx.view = await resolveView(def.view, event, graph)
+      }
+
+      // Resolve pattern matches if specified
+      if (def.pattern) {
+        const parsed = parsePattern(def.pattern)
+        ctx.matches = await matchPattern(parsed, graph)
       }
 
       // Emit behavior.triggered (goes through emit so other behaviors can react)
@@ -52,6 +89,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         type: 'behavior.triggered',
         payload: { behaviorName: def.name, triggerEventId: event.id },
         causedBy: event.id,
+        actor: 'runtime',
       })
 
       try {
@@ -62,6 +100,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
           type: 'behavior.completed',
           payload: { behaviorName: def.name, triggerEventId: event.id },
           causedBy: event.id,
+          actor: 'runtime',
         })
       } catch (error) {
         // Emit behavior.failed (other behaviors can react to failures)
@@ -73,6 +112,7 @@ export function createRuntime(options: RuntimeOptions): Runtime {
             reason: error instanceof Error ? error.message : String(error),
           },
           causedBy: event.id,
+          actor: 'runtime',
         })
       }
     }
@@ -111,5 +151,54 @@ export function createRuntime(options: RuntimeOptions): Runtime {
     },
 
     emit,
+
+    async fork(graphId: string, opts: ForkOptions): Promise<GraphAPI> {
+      if (!storage.copyEventsUpTo) {
+        throw new Error('Storage adapter does not support forking (missing copyEventsUpTo)')
+      }
+
+      const forkId = opts.forkId ?? `${graphId}_fork_${Date.now()}`
+      const count = await storage.copyEventsUpTo(graphId, forkId, opts.atEvent)
+
+      const forkedGraph = new Graph(forkId, storage, emit)
+      graphs.set(forkId, forkedGraph)
+
+      await emit(forkId, {
+        type: 'custom.graph_forked' as EventInput['type'],
+        payload: {
+          sourceGraphId: graphId,
+          atEvent: opts.atEvent,
+          label: opts.label ?? '',
+          eventsCopied: count,
+        },
+        actor: 'runtime',
+      })
+
+      return forkedGraph
+    },
+
+    async approve(patchId: string, decidedBy: string): Promise<void> {
+      const proposal = patches.resolve(patchId, 'applied', decidedBy)
+      const graph = getGraph(proposal.graphId)
+      await graph.addObject({ type: proposal.objectType, data: proposal.data })
+      await emit(proposal.graphId, {
+        type: 'patch.applied',
+        payload: { patchId, objectType: proposal.objectType, decidedBy },
+        actor: decidedBy,
+      })
+    },
+
+    async deny(patchId: string, decidedBy: string): Promise<void> {
+      const proposal = patches.resolve(patchId, 'rejected', decidedBy)
+      await emit(proposal.graphId, {
+        type: 'patch.rejected',
+        payload: { patchId, objectType: proposal.objectType, decidedBy },
+        actor: decidedBy,
+      })
+    },
+
+    pendingPatches(graphId: string): PatchProposal[] {
+      return patches.pending(graphId)
+    },
   }
 }

@@ -102,6 +102,28 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9
 
+  packages/know:
+    dependencies:
+      '@operad/adapter-memory':
+        specifier: workspace:*
+        version: link:../adapter-memory
+      '@operad/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@operad/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(tsx@4.22.3)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9
+
   packages/server:
     dependencies:
       '@hono/node-server':

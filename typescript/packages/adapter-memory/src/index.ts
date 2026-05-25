@@ -167,6 +167,7 @@ export class MemoryAdapter implements StorageAdapter {
       payload: { ...input.payload },
       causedBy: input.causedBy ?? null,
       timestamp: new Date().toISOString(),
+      ...(input.actor !== undefined && { actor: input.actor }),
     }
     this.events.set(id, event)
 
@@ -346,6 +347,47 @@ export class MemoryAdapter implements StorageAdapter {
     }
 
     return stale
+  }
+
+  // ─── Forking ──────────────────────────────────────────────────────
+
+  async copyEventsUpTo(sourceGraphId: string, targetGraphId: string, eventId: string): Promise<number> {
+    const sourceEventIds = this.eventsByGraph.get(sourceGraphId)
+    if (!sourceEventIds) return 0
+
+    let count = 0
+    for (const id of sourceEventIds) {
+      const event = this.events.get(id)
+      if (!event) continue
+
+      // Copy event with new ID into target graph
+      const newId = genId('evt')
+      const copied: GraphEvent = {
+        ...event,
+        id: newId,
+        graphId: targetGraphId,
+      }
+      this.events.set(newId, copied)
+
+      if (!this.eventsByGraph.has(targetGraphId)) {
+        this.eventsByGraph.set(targetGraphId, [])
+      }
+      this.eventsByGraph.get(targetGraphId)!.push(newId)
+
+      if (copied.causedBy) {
+        if (!this.eventsByCausedBy.has(copied.causedBy)) {
+          this.eventsByCausedBy.set(copied.causedBy, [])
+        }
+        this.eventsByCausedBy.get(copied.causedBy)!.push(newId)
+      }
+
+      count++
+
+      // Stop after copying the cutpoint event
+      if (id === eventId) break
+    }
+
+    return count
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────

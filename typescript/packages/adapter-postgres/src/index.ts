@@ -261,9 +261,11 @@ export class PostgresAdapter implements StorageAdapter {
     const now = new Date().toISOString()
     const causedBy = input.causedBy ?? null
 
+    const actor = input.actor ?? null
+
     await this.sql`
-      INSERT INTO operad_events (id, graph_id, type, payload, caused_by, timestamp)
-      VALUES (${id}, ${graphId}, ${input.type}, ${JSON.stringify(input.payload)}, ${causedBy}, ${now})
+      INSERT INTO operad_events (id, graph_id, type, payload, caused_by, timestamp, actor)
+      VALUES (${id}, ${graphId}, ${input.type}, ${JSON.stringify(input.payload)}, ${causedBy}, ${now}, ${actor})
     `
 
     return {
@@ -273,6 +275,7 @@ export class PostgresAdapter implements StorageAdapter {
       payload: { ...input.payload },
       causedBy,
       timestamp: now,
+      ...(input.actor !== undefined && { actor: input.actor }),
     }
   }
 
@@ -512,7 +515,7 @@ export class PostgresAdapter implements StorageAdapter {
   }
 
   private rowToEvent(row: Record<string, unknown>): GraphEvent {
-    return {
+    const event: GraphEvent = {
       id: row.id as string,
       graphId: row.graph_id as string,
       type: row.type as GraphEvent['type'],
@@ -520,6 +523,8 @@ export class PostgresAdapter implements StorageAdapter {
       causedBy: (row.caused_by as string | null) ?? null,
       timestamp: new Date(row.timestamp as string).toISOString(),
     }
+    if (row.actor) event.actor = row.actor as string
+    return event
   }
 
   private rowToDecision(row: Record<string, unknown>): Decision {
