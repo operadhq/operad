@@ -5,7 +5,8 @@
     "build": "turbo build",
     "test": "turbo test",
     "lint": "turbo lint",
-    "clean": "turbo clean"
+    "clean": "turbo clean",
+    "publish:all": "pnpm -r publish --no-git-checks"
   },
   "devDependencies": {
     "turbo": "^2.3.0",

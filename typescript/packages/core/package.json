@@ -17,17 +17,24 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "ai-agents",
     "event-sourcing",
     "knowledge-graph",
     "agent-memory",
+    "ai-memory",
     "provenance",
     "audit-trail",
     "causal-chains",
-    "decision-records"
+    "decision-records",
+    "langchain",
+    "mcp"
   ],
   "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
   "repository": {

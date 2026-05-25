@@ -17,14 +17,19 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "operad",
     "ai-agents",
     "storage-adapter",
     "in-memory",
-    "event-sourcing"
+    "event-sourcing",
+    "agent-memory"
   ],
   "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
   "repository": {

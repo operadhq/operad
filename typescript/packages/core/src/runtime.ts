@@ -12,6 +12,11 @@ import type {
   ForkOptions,
   PatchProposal,
   ProposeInput,
+  RevertOptions,
+  RevertResult,
+  ExploreOptions,
+  ExploreResult,
+  ReversalHandler,
 } from './types.js'
 import { Graph } from './graph.js'
 import { BehaviorRegistry } from './behavior.js'
@@ -20,6 +25,7 @@ import { parsePattern, matchPattern } from './pattern.js'
 import { PatchRegistry } from './patch.js'
 import { computeDiff } from './diff.js'
 import { checkout as checkoutImpl } from './replay.js'
+import { createEffectRegistry } from './effects.js'
 
 /**
  * The Runtime is the event loop of Operad:
@@ -33,6 +39,8 @@ export function createRuntime(options: RuntimeOptions): Runtime {
   const registry = new BehaviorRegistry()
   const graphs = new Map<string, Graph>()
   const patches = new PatchRegistry()
+  const reversals = new Map<string, ReversalHandler>() // event type → reversal handler
+  const effects = createEffectRegistry()
 
   // Register initial behaviors
   for (const def of options.behaviors ?? []) {
@@ -220,6 +228,148 @@ export function createRuntime(options: RuntimeOptions): Runtime {
 
     pendingPatches(graphId: string): PatchProposal[] {
       return patches.pending(graphId)
+    },
+
+    async revert(graphId: string, opts: RevertOptions): Promise<RevertResult> {
+      const actor = opts.actor ?? 'runtime'
+      const allEvents = await storage.queryEvents(graphId, {})
+
+      // Find the cutpoint
+      const cutIndex = allEvents.findIndex((e) => e.id === opts.toEvent)
+      if (cutIndex === -1) throw new Error(`Event not found: ${opts.toEvent}`)
+
+      // Events to revert (everything AFTER the cutpoint, in reverse order)
+      const toRevert = allEvents.slice(cutIndex + 1).reverse()
+
+      const compensatingEvents: GraphEvent[] = []
+      const unreversible: GraphEvent[] = []
+
+      for (const event of toRevert) {
+        // Emit a compensating event
+        const compensating = await emit(graphId, {
+          type: `custom.reverted.${event.type}` as EventInput['type'],
+          payload: {
+            originalEventId: event.id,
+            originalType: event.type,
+            originalPayload: event.payload,
+          },
+          causedBy: event.id,
+          actor,
+        })
+        compensatingEvents.push(compensating)
+
+        // If reverseEffects is true, use effect categories to decide reversal strategy
+        if (opts.reverseEffects) {
+          const toolName = typeof event.payload.tool === 'string' ? event.payload.tool : null
+          const category = toolName ? effects.categorize(toolName) : null
+
+          if (category === 'pure') {
+            // Pure effects: nothing to reverse, skip
+          } else if (category === 'bufferable') {
+            // Bufferable effects: check for tool-specific reverser first, then event-type handler
+            const toolReverser = toolName ? effects.getReverser(toolName) : undefined
+            const handler = toolReverser ?? reversals.get(event.type)
+            if (handler) {
+              await handler(event)
+            }
+            // Bufferable events are always considered reversible (even without handler,
+            // they are structurally invertible e.g. Edit old↔new swap)
+          } else {
+            // Externalized or unknown: check for registered handler, flag as unreversible if none
+            const toolReverser = toolName ? effects.getReverser(toolName) : undefined
+            const handler = toolReverser ?? reversals.get(event.type)
+            if (handler) {
+              await handler(event)
+            } else if (event.type.startsWith('custom.tool_called')) {
+              unreversible.push(event)
+            }
+          }
+        }
+
+        // Undo graph mutations (object/relation changes)
+        if (event.type === 'object.created') {
+          const objId = event.payload.objectId as string | undefined
+          if (objId) await storage.removeObject(objId)
+        } else if (event.type === 'relation.created') {
+          const relId = event.payload.relationId as string | undefined
+          if (relId) await storage.removeRelation(relId)
+        }
+      }
+
+      // Emit a summary event
+      await emit(graphId, {
+        type: 'custom.reverted' as EventInput['type'],
+        payload: {
+          toEvent: opts.toEvent,
+          eventsReverted: toRevert.length,
+          unreversibleCount: unreversible.length,
+        },
+        actor,
+      })
+
+      return {
+        eventsReverted: toRevert.length,
+        compensatingEvents,
+        unreversible,
+      }
+    },
+
+    async explore(graphId: string, opts: ExploreOptions): Promise<ExploreResult> {
+      if (!storage.copyEventsUpTo) {
+        throw new Error('Storage adapter does not support branching (missing copyEventsUpTo)')
+      }
+
+      const label = opts.label ?? 'explore'
+      const branches: Array<{ branchId: string; score: number; result: unknown }> = []
+
+      // Fork N branches from the same point
+      const branchGraphs: Array<{ id: string; graph: GraphAPI }> = []
+      for (let i = 0; i < opts.branches; i++) {
+        const branchId = `${graphId}_${label}_${i}_${Date.now()}`
+        const branchGraph = await this.branch(graphId, {
+          atEvent: opts.atEvent,
+          branchId,
+          label: `${label}-${i}`,
+        })
+        branchGraphs.push({ id: branchId, graph: branchGraph })
+      }
+
+      // Run worker on each branch (parallel)
+      const results = await Promise.all(
+        branchGraphs.map(async ({ id, graph }) => {
+          const result = await opts.worker(graph, id)
+          const score = opts.scorer(result, id)
+          return { branchId: id, score, result }
+        })
+      )
+
+      // Sort by score, pick winner
+      results.sort((a, b) => b.score - a.score)
+      const winner = results[0]
+
+      // Emit explore summary on the original graph
+      await emit(graphId, {
+        type: 'custom.explored' as EventInput['type'],
+        payload: {
+          winnerId: winner.branchId,
+          winnerScore: winner.score,
+          branchCount: opts.branches,
+          scores: results.map((r) => ({ branchId: r.branchId, score: r.score })),
+        },
+        actor: 'runtime',
+      })
+
+      return {
+        winnerId: winner.branchId,
+        winnerScore: winner.score,
+        branches: results,
+        winnerGraph: graphs.get(winner.branchId)!,
+      }
+    },
+
+    /** Register a reversal handler for a specific event type */
+    registerReversal(eventType: string, handler: ReversalHandler): void {
+      reversals.set(eventType, handler)
     },
   }
 }

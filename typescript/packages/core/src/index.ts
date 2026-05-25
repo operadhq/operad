@@ -44,6 +44,11 @@ export type {
   RelationDiff,
   LLMProvider,
   LLMBehaviorDef,
+  RevertOptions,
+  RevertResult,
+  ReversalHandler,
+  ExploreOptions,
+  ExploreResult,
 } from './types.js'
 
 // Runtime
@@ -86,6 +91,13 @@ export { computeDiff } from './diff.js'
 // Replay (checkout / time-travel)
 export { checkout } from './replay.js'
 
+// Effects (Atomix-inspired side-effect categorization)
+export { createEffectRegistry } from './effects.js'
+export type { EffectCategory, EffectRegistry } from './effects.js'
+
 // ASCII Graph Renderer
 export { renderAsciiGraph } from './render.js'
 export type { RenderableObject, RenderableRelation } from './render.js'
+
+// Pre-built Behaviors
+export { wasteAlert, costBudget, autoRetry, branchOnFailure } from './behaviors/index.js'
