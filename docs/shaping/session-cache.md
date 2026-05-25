@@ -99,3 +99,36 @@ branch, diff, checkout, and behaviors.
 **Selected: D**
 
 Next step: Build it. Test on real Claude Code session files in ~/.claude/projects/.
+
+---
+
+## Future Considerations
+
+### Dynamic Graph Enrichment (GraphRAG-style)
+
+> "GraphRAG is one algorithm, we can add many in many graph layers and make it dynamic,
+> so that when you ask something, it also enriches the graph." — Cognee insight
+
+**Current state:** Operad's graph is causal/temporal — events record what happened, in
+what order, caused by what. This is Layer 1: the provenance layer.
+
+**Future Layer 2: Semantic enrichment** — when a user queries the graph ("what files
+relate to auth?"), a behavior could:
+1. Run the query against the causal graph
+2. Discover semantic connections not explicitly recorded
+3. Emit `knowledge.linked` events that enrich the graph for future queries
+
+**Why not now:**
+- The wedge is simplicity — import → see cost/waste → get insights
+- Need real users hitting real queries before knowing what to enrich
+- Adding query-time mutation before PMF adds complexity without validation
+
+**Why architecturally ready:**
+- Behaviors are reactive handlers that fire on events — a `graphRagEnrich` behavior
+  is just another behavior that listens for `query.executed` events
+- Multiple graph layers are already supported via separate `graphId` namespaces
+- The event-sourced model means enrichment is non-destructive — original causal
+  layer is untouched, semantic layer is additive
+
+**When to revisit:** After users ask "I wish the graph could connect X to Y
+automatically" — that's the signal to add Layer 2.
