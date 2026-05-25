@@ -410,6 +410,127 @@ async function cmdStash(positional: string[], flags: Record<string, string | boo
   }
 }
 
+async function cmdGraph(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session graph --graph <id>`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+  storage.close()
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    process.exit(0)
+  }
+
+  if (flags['json']) {
+    // Build structured turn data
+    const turns = buildTurns(events)
+    console.log(JSON.stringify(turns, null, 2))
+    return
+  }
+
+  // Summary header
+  const goalEvents = events.filter(e => e.type === 'goal.set')
+  const toolEvents = events.filter(e => e.type === 'custom.tool_called')
+  const blameEvents = events.filter(e => e.type === 'custom.blame_recorded')
+  const totalCost = blameEvents.reduce((sum, e) => sum + ((e.payload.cost as number) ?? 0), 0)
+
+  console.log(`╔${'═'.repeat(66)}╗`)
+  console.log(`║  ${c.bold}OPERAD EVENT GRAPH${c.reset} — ${c.cyan}${graphId}${c.reset}${' '.repeat(Math.max(0, 66 - 22 - graphId.length))}║`)
+  console.log(`║  ${events.length} events │ ${goalEvents.length} goals │ ${toolEvents.length} tools │ $${totalCost.toFixed(2)} cost${' '.repeat(Math.max(0, 66 - 50 - totalCost.toFixed(2).length - String(events.length).length - String(goalEvents.length).length - String(toolEvents.length).length))}║`)
+  console.log(`╚${'═'.repeat(66)}╝`)
+  console.log()
+
+  // Build turns (goal → events until next goal)
+  const turns = buildTurns(events)
+
+  const maxTurns = parseInt(flags['limit'] as string ?? '20', 10)
+  const showAll = flags['all'] as boolean
+
+  for (let i = 0; i < (showAll ? turns.length : Math.min(turns.length, maxTurns)); i++) {
+    const turn = turns[i]
+    const goalText = turn.goalText.replace(/\n/g, ' ').slice(0, 72)
+    const turnToolEvents = turn.events.filter(e => e.type === 'custom.tool_called')
+    const turnBlame = turn.events.filter(e => e.type === 'custom.blame_recorded')
+    const turnCost = turnBlame.reduce((sum, e) => sum + ((e.payload.cost as number) ?? 0), 0)
+
+    // Tool breakdown
+    const tools: Record<string, number> = {}
+    for (const e of turnToolEvents) {
+      const t = (e.payload.tool as string) ?? '?'
+      tools[t] = (tools[t] ?? 0) + 1
+    }
+    const toolStr = Object.entries(tools)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => n > 1 ? `${t}×${n}` : t)
+      .join(', ')
+
+    console.log(`  ${c.green}★${c.reset} ${c.bold}Goal #${i + 1}:${c.reset} ${goalText}`)
+    console.log(`  │`)
+    if (turnToolEvents.length > 0) {
+      console.log(`  ├── ${c.cyan}⚙ Tools:${c.reset} ${toolStr}`)
+    }
+    if (turnCost > 0) {
+      console.log(`  ├── ${c.yellow}$ Cost:${c.reset} $${turnCost.toFixed(2)}`)
+    }
+    console.log(`  ├── Events: ${turn.events.length}`)
+    console.log(`  │`)
+  }
+
+  if (!showAll && turns.length > maxTurns) {
+    console.log(`  ${c.dim}... +${turns.length - maxTurns} more turns (use --all to show all)${c.reset}`)
+    console.log(`  │`)
+  }
+
+  console.log(`  ╰── ${c.bold}◉${c.reset} Graph complete: ${events.length} events`)
+  console.log()
+
+  // Tool distribution bar chart
+  const toolCounts: Record<string, number> = {}
+  for (const e of toolEvents) {
+    const tool = (e.payload.tool as string) ?? '?'
+    toolCounts[tool] = (toolCounts[tool] ?? 0) + 1
+  }
+
+  if (Object.keys(toolCounts).length > 0) {
+    console.log(`  ${c.bold}Tool Distribution:${c.reset}`)
+    console.log(`  ┌${'─'.repeat(48)}┐`)
+    const maxCount = Math.max(...Object.values(toolCounts))
+    const sorted = Object.entries(toolCounts).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    for (const [tool, count] of sorted) {
+      const bar = '█'.repeat(Math.round((count / maxCount) * 28))
+      console.log(`  │ ${tool.padEnd(12)}${bar.padEnd(30)}${String(count).padStart(3)} │`)
+    }
+    console.log(`  └${'─'.repeat(48)}┘`)
+  }
+}
+
+interface Turn {
+  goalText: string
+  events: GraphEvent[]
+}
+
+function buildTurns(events: GraphEvent[]): Turn[] {
+  const turns: Turn[] = []
+  let current: Turn | null = null
+
+  for (const e of events) {
+    if (e.type === 'goal.set') {
+      if (current) turns.push(current)
+      current = { goalText: (e.payload.text as string) ?? '', events: [] }
+    } else if (current) {
+      current.events.push(e)
+    }
+  }
+  if (current) turns.push(current)
+  return turns
+}
+
 async function cmdRevert(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
   if (positional.length === 0) {
     console.error(`${c.red}Error:${c.reset} Missing event ID to revert to.`)
@@ -601,6 +722,7 @@ ${c.bold}USAGE${c.reset}
 
 ${c.bold}COMMANDS${c.reset}
   ${c.green}commit${c.reset} <path.jsonl>          Import JSONL into the persistent graph
+  ${c.green}graph${c.reset} --graph <id>            Show ASCII event graph (turn-based view)
   ${c.green}log${c.reset} --graph <id>             Show event history (like git log)
   ${c.green}blame${c.reset} --graph <id>           Show cost per goal (which goal spent how much)
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
@@ -659,6 +781,9 @@ async function main() {
   switch (command) {
     case 'commit':
       await cmdCommit(positional, flags)
+      break
+    case 'graph':
+      await cmdGraph(positional, flags)
       break
     case 'log':
       await cmdLog(positional, flags)
