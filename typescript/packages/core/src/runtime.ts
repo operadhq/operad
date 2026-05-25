@@ -5,8 +5,10 @@ import type {
   GraphAPI,
   EventInput,
   GraphEvent,
+  GraphDiff,
   BehaviorDef,
   BehaviorContext,
+  BranchOptions,
   ForkOptions,
   PatchProposal,
   ProposeInput,
@@ -16,6 +18,8 @@ import { BehaviorRegistry } from './behavior.js'
 import { resolveView } from './view.js'
 import { parsePattern, matchPattern } from './pattern.js'
 import { PatchRegistry } from './patch.js'
+import { computeDiff } from './diff.js'
+import { checkout as checkoutImpl } from './replay.js'
 
 /**
  * The Runtime is the event loop of Operad:
@@ -152,18 +156,18 @@ export function createRuntime(options: RuntimeOptions): Runtime {
 
     emit,
 
-    async fork(graphId: string, opts: ForkOptions): Promise<GraphAPI> {
+    async branch(graphId: string, opts: BranchOptions): Promise<GraphAPI> {
       if (!storage.copyEventsUpTo) {
-        throw new Error('Storage adapter does not support forking (missing copyEventsUpTo)')
+        throw new Error('Storage adapter does not support branching (missing copyEventsUpTo)')
       }
 
-      const forkId = opts.forkId ?? `${graphId}_fork_${Date.now()}`
-      const count = await storage.copyEventsUpTo(graphId, forkId, opts.atEvent)
+      const branchId = opts.branchId ?? `${graphId}_branch_${Date.now()}`
+      const count = await storage.copyEventsUpTo(graphId, branchId, opts.atEvent)
 
-      const forkedGraph = new Graph(forkId, storage, emit)
-      graphs.set(forkId, forkedGraph)
+      const branchedGraph = new Graph(branchId, storage, emit)
+      graphs.set(branchId, branchedGraph)
 
-      await emit(forkId, {
+      await emit(branchId, {
         type: 'custom.graph_forked' as EventInput['type'],
         payload: {
           sourceGraphId: graphId,
@@ -174,7 +178,24 @@ export function createRuntime(options: RuntimeOptions): Runtime {
         actor: 'runtime',
       })
 
-      return forkedGraph
+      return branchedGraph
+    },
+
+    /** @deprecated Use branch() */
+    async fork(graphId: string, opts: ForkOptions): Promise<GraphAPI> {
+      return this.branch(graphId, {
+        atEvent: opts.atEvent,
+        label: opts.label,
+        branchId: opts.branchId ?? opts.forkId,
+      })
+    },
+
+    async diff(sourceGraphId: string, targetGraphId: string): Promise<GraphDiff> {
+      return computeDiff(sourceGraphId, targetGraphId, storage)
+    },
+
+    async checkout(graphId: string, eventId: string): Promise<GraphAPI> {
+      return checkoutImpl(graphId, eventId, storage)
     },
 
     async approve(patchId: string, decidedBy: string): Promise<void> {

@@ -387,6 +387,32 @@ export class MemoryAdapter implements StorageAdapter {
       if (id === eventId) break
     }
 
+    // Copy objects from source graph into target graph
+    const sourceObjIds = this.objectsByGraph.get(sourceGraphId)
+    if (sourceObjIds) {
+      for (const objId of sourceObjIds) {
+        const obj = this.objects.get(objId)
+        if (!obj) continue
+        const newObjId = genId('obj')
+        const copiedObj = { ...obj, id: newObjId, graphId: targetGraphId }
+        this.objects.set(newObjId, copiedObj)
+        this.indexAdd(this.objectsByGraph, targetGraphId, newObjId)
+      }
+    }
+
+    // Copy relations from source graph into target graph
+    const sourceRelIds = this.relationsByGraph.get(sourceGraphId)
+    if (sourceRelIds) {
+      for (const relId of sourceRelIds) {
+        const rel = this.relations.get(relId)
+        if (!rel) continue
+        const newRelId = genId('rel')
+        const copiedRel = { ...rel, id: newRelId, graphId: targetGraphId }
+        this.relations.set(newRelId, copiedRel)
+        this.indexAdd(this.relationsByGraph, targetGraphId, newRelId)
+      }
+    }
+
     return count
   }
 

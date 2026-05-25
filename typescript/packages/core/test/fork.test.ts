@@ -3,7 +3,89 @@ import { createRuntime } from '../src/index.js'
 import type { Runtime, GraphAPI } from '../src/types.js'
 import { MemoryAdapter } from '@operad/adapter-memory'
 
-describe('Forking', () => {
+describe('Branching (git vocabulary)', () => {
+  let storage: MemoryAdapter
+  let runtime: Runtime
+  let graph: GraphAPI
+
+  beforeEach(async () => {
+    storage = new MemoryAdapter()
+    runtime = createRuntime({ storage })
+    graph = await runtime.createGraph('source')
+  })
+
+  it('should branch using the new branch() method', async () => {
+    const evt1 = await runtime.emit('source', {
+      type: 'custom.data',
+      payload: { value: 'original' },
+    })
+
+    const branched = await runtime.branch('source', { atEvent: evt1.id })
+    expect(branched.id).toBeTruthy()
+
+    const branchEvents = await storage.queryEvents(branched.id, {})
+    expect(branchEvents.length).toBeGreaterThan(0)
+  })
+
+  it('should accept branchId option', async () => {
+    const evt1 = await runtime.emit('source', {
+      type: 'custom.data',
+      payload: {},
+    })
+
+    const branched = await runtime.branch('source', {
+      atEvent: evt1.id,
+      branchId: 'my-branch',
+    })
+    expect(branched.id).toBe('my-branch')
+  })
+
+  it('fork() should work as alias for branch()', async () => {
+    const evt1 = await runtime.emit('source', {
+      type: 'custom.data',
+      payload: {},
+    })
+
+    const forked = await runtime.fork('source', {
+      atEvent: evt1.id,
+      branchId: 'via-fork-alias',
+    })
+    expect(forked.id).toBe('via-fork-alias')
+  })
+
+  it('should copy objects into the branched graph', async () => {
+    await graph.addObject({ type: 'claim', data: { amount: 100 } })
+
+    const evt = await runtime.emit('source', {
+      type: 'custom.checkpoint',
+      payload: {},
+    })
+
+    const branched = await runtime.branch('source', { atEvent: evt.id })
+    const branchObjects = await branched.queryObjects({})
+    expect(branchObjects).toHaveLength(1)
+    expect(branchObjects[0].type).toBe('claim')
+    expect(branchObjects[0].data.amount).toBe(100)
+  })
+
+  it('should copy relations into the branched graph', async () => {
+    const obj1 = await graph.addObject({ type: 'person', data: { name: 'Alice' } })
+    const obj2 = await graph.addObject({ type: 'claim', data: { amount: 50 } })
+    await graph.addRelation(obj1.id, obj2.id, 'filed', {})
+
+    const evt = await runtime.emit('source', {
+      type: 'custom.checkpoint',
+      payload: {},
+    })
+
+    const branched = await runtime.branch('source', { atEvent: evt.id })
+    const branchRelations = await branched.queryRelations({})
+    expect(branchRelations).toHaveLength(1)
+    expect(branchRelations[0].type).toBe('filed')
+  })
+})
+
+describe('Forking (legacy)', () => {
   let storage: MemoryAdapter
   let runtime: Runtime
   let graph: GraphAPI
@@ -88,7 +170,7 @@ describe('Forking', () => {
 
     await expect(
       bareRuntime.fork('bare', { atEvent: 'evt1' })
-    ).rejects.toThrow('does not support forking')
+    ).rejects.toThrow('does not support branching')
   })
 
   it('should use custom forkId when provided', async () => {

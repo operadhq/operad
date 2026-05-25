@@ -296,20 +296,69 @@ export interface RuntimeOptions {
   behaviors?: BehaviorDef[]
 }
 
-// ─── Forking ────────────────────────────────────────────────────────────────
+// ─── Branching (git-vocabulary) ─────────────────────────────────────────────
 
+export interface BranchOptions {
+  atEvent: string
+  label?: string
+  branchId?: string
+}
+
+/** @deprecated Use BranchOptions */
 export interface ForkOptions {
   atEvent: string
   label?: string
+  /** @deprecated Use branchId */
   forkId?: string
+  branchId?: string
 }
+
+// ─── Diffing ────────────────────────────────────────────────────────────────
+
+export interface ObjectDiff {
+  objectId: string
+  type: string
+  status: 'added' | 'removed' | 'modified'
+  /** Present for 'modified' — shows divergent data on source side */
+  sourceData?: Record<string, JsonValue>
+  /** Present for 'modified' — shows divergent data on target side */
+  targetData?: Record<string, JsonValue>
+  /** Present for 'added' or 'removed' — the object's data */
+  data?: Record<string, JsonValue>
+}
+
+export interface RelationDiff {
+  relationId: string
+  type: string
+  sourceId: string
+  targetId: string
+  status: 'added' | 'removed'
+}
+
+export interface GraphDiff {
+  sourceGraphId: string
+  targetGraphId: string
+  objects: ObjectDiff[]
+  relations: RelationDiff[]
+  /** Events on source after the fork point — the source's story */
+  sourceLog: GraphEvent[]
+  /** Events on target after the fork point — the branch's story */
+  targetLog: GraphEvent[]
+}
+
+// ─── Runtime ────────────────────────────────────────────────────────────────
 
 export interface Runtime {
   createGraph(id: string): Promise<GraphAPI>
   getGraph(id: string): GraphAPI
   registerBehavior(def: BehaviorDef): void
   emit(graphId: string, input: EventInput): Promise<GraphEvent>
+  branch(graphId: string, opts: BranchOptions): Promise<GraphAPI>
+  /** @deprecated Use branch() */
   fork(graphId: string, opts: ForkOptions): Promise<GraphAPI>
+  diff(sourceGraphId: string, targetGraphId: string): Promise<GraphDiff>
+  /** Replay the log up to eventId, returning the graph state at that point */
+  checkout(graphId: string, eventId: string): Promise<GraphAPI>
   approve(patchId: string, decidedBy: string): Promise<void>
   deny(patchId: string, decidedBy: string): Promise<void>
   pendingPatches(graphId: string): PatchProposal[]

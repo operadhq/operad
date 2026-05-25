@@ -487,6 +487,67 @@ export class PostgresAdapter implements StorageAdapter {
     return rows.map((r) => this.rowToObject(r))
   }
 
+  // ─── Branching / Forking ────────────────────────────────────────────
+
+  async copyEventsUpTo(sourceGraphId: string, targetGraphId: string, eventId: string): Promise<number> {
+    await this.ready()
+
+    // 1. Find the cutpoint event's timestamp
+    const cutpointRows = await this.sql`
+      SELECT timestamp FROM operad_events WHERE id = ${eventId} AND graph_id = ${sourceGraphId}
+    `
+    if (cutpointRows.length === 0) throw new Error(`Cutpoint event not found: ${eventId}`)
+    const cutpointTimestamp = cutpointRows[0].timestamp
+
+    // 2. Copy events up to and including the cutpoint
+    const eventRows = await this.sql`
+      SELECT id, graph_id, type, payload, caused_by, timestamp, actor
+      FROM operad_events
+      WHERE graph_id = ${sourceGraphId} AND timestamp <= ${cutpointTimestamp}
+      ORDER BY timestamp
+    `
+
+    let count = 0
+    for (const row of eventRows) {
+      const newId = genId('evt')
+      const actor = row.actor ?? null
+      await this.sql`
+        INSERT INTO operad_events (id, graph_id, type, payload, caused_by, timestamp, actor)
+        VALUES (${newId}, ${targetGraphId}, ${row.type}, ${JSON.stringify(row.payload)}, ${row.caused_by}, ${row.timestamp}, ${actor})
+      `
+      count++
+      if (row.id === eventId) break
+    }
+
+    // 3. Copy objects from source graph
+    const objRows = await this.sql`
+      SELECT id, type, data, created_at, updated_at, created_by_event_id
+      FROM operad_objects WHERE graph_id = ${sourceGraphId}
+    `
+    for (const obj of objRows) {
+      const newObjId = genId('obj')
+      await this.sql`
+        INSERT INTO operad_objects (id, graph_id, type, data, created_at, updated_at, created_by_event_id)
+        VALUES (${newObjId}, ${targetGraphId}, ${obj.type}, ${JSON.stringify(obj.data)}, ${obj.created_at}, ${obj.updated_at}, ${obj.created_by_event_id})
+      `
+    }
+
+    // 4. Copy relations from source graph
+    const relRows = await this.sql`
+      SELECT id, source_id, target_id, type, data, created_at, created_by_event_id
+      FROM operad_relations WHERE graph_id = ${sourceGraphId}
+    `
+    for (const rel of relRows) {
+      const newRelId = genId('rel')
+      await this.sql`
+        INSERT INTO operad_relations (id, graph_id, source_id, target_id, type, data, created_at, created_by_event_id)
+        VALUES (${newRelId}, ${targetGraphId}, ${rel.source_id}, ${rel.target_id}, ${rel.type}, ${JSON.stringify(rel.data)}, ${rel.created_at}, ${rel.created_by_event_id})
+      `
+    }
+
+    return count
+  }
+
   // ─── Row Mappers ──────────────────────────────────────────────────
 
   private rowToObject(row: Record<string, unknown>): GraphObject {

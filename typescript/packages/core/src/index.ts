@@ -38,6 +38,10 @@ export type {
   PatchProposal,
   ProposeInput,
   ForkOptions,
+  BranchOptions,
+  GraphDiff,
+  ObjectDiff,
+  RelationDiff,
   LLMProvider,
   LLMBehaviorDef,
 } from './types.js'
@@ -75,3 +79,13 @@ export { DecisionLog } from './decision.js'
 
 // Health
 export { HealthTracker } from './health.js'
+
+// Diff
+export { computeDiff } from './diff.js'
+
+// Replay (checkout / time-travel)
+export { checkout } from './replay.js'
+
+// ASCII Graph Renderer
+export { renderAsciiGraph } from './render.js'
+export type { RenderableObject, RenderableRelation } from './render.js'
