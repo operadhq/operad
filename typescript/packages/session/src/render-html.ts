@@ -1,8 +1,9 @@
 /**
  * HTML graph renderer — Timeline + Tree split-panel visualization.
  *
- * Generates a self-contained HTML file (~15KB) with no external dependencies.
- * Left panel: chronological goal list. Right panel: selected goal's tree.
+ * Generates a self-contained HTML file (~18KB) with no external dependencies.
+ * Left panel: chronological goal list with replay controls.
+ * Right panel: selected goal's tree with fork markers.
  *
  * Pure function — no I/O. Caller writes the file and opens the browser.
  */
@@ -119,6 +120,7 @@ function buildNodeLabel(obj: RenderableObject): string {
 function buildNodeTooltip(obj: RenderableObject): string {
   const lines = [`Type: ${obj.type}`, `ID: ${obj.id}`]
   for (const [k, v] of Object.entries(obj.data)) {
+    if (k.startsWith('_')) continue
     const val = typeof v === 'string' ? v.slice(0, 120) : JSON.stringify(v)
     lines.push(`${k}: ${val}`)
   }
@@ -141,7 +143,7 @@ function buildHtml(
     const countBadge = childCount > 0 ? `<span class="child-count">${childCount}</span>` : ''
     const ts = formatTimestamp(g.data._createdAt as string | undefined)
     const timeBadge = ts ? `<span class="goal-time">${escapeHtml(ts)}</span>` : ''
-    return `<div class="goal-item" data-id="${escapeHtml(g.id)}" data-index="${i}"><span class="goal-num">#${i + 1}</span><span class="goal-icon">★</span><span class="goal-mid"><span class="goal-text">${escapeHtml(text)}</span>${timeBadge}</span>${countBadge}</div>`
+    return `<div class="goal-item" data-id="${escapeHtml(g.id)}" data-index="${i}"><span class="goal-num">#${i + 1}</span><span class="goal-icon">★</span><span class="goal-mid"><span class="goal-text">${escapeHtml(text)}</span>${timeBadge}</span>${countBadge}<button class="fork-btn" title="Mark fork point" data-id="${escapeHtml(g.id)}">⑂</button></div>`
   }).join('\n      ')
 
   return `<!DOCTYPE html>
@@ -158,8 +160,62 @@ function buildHtml(
     height: 100vh; overflow: hidden;
   }
 
-  /* Split layout */
-  .container { display: flex; height: 100vh; }
+  /* Top toolbar */
+  .toolbar {
+    height: 44px; background: #12122a; border-bottom: 1px solid #2a2a4a;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; flex-shrink: 0;
+  }
+  .toolbar-left { display: flex; align-items: center; gap: 12px; }
+  .toolbar-center { display: flex; align-items: center; gap: 8px; }
+  .toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+  .toolbar .brand {
+    font-size: 12px; color: #555; text-decoration: none;
+    transition: color 0.15s;
+  }
+  .toolbar .brand:hover { color: #88aaff; }
+  .toolbar .brand span { color: #88aaff; font-weight: 600; }
+
+  .toolbar .session-info {
+    font-size: 12px; color: #666;
+  }
+  .toolbar .session-info .val { color: #aaa; }
+
+  .tb-btn {
+    background: transparent; border: 1px solid #333;
+    color: #aaa; padding: 4px 12px; border-radius: 4px;
+    cursor: pointer; font-size: 12px; transition: all 0.15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .tb-btn:hover { border-color: #555; color: #fff; background: #1e1e3a; }
+  .tb-btn.active { border-color: #2B5CE6; color: #88aaff; }
+  .tb-btn svg { width: 14px; height: 14px; }
+
+  /* Replay scrubber */
+  .replay-bar {
+    display: none; height: 36px; background: #12122a;
+    border-bottom: 1px solid #2a2a4a;
+    align-items: center; padding: 0 16px; gap: 12px;
+  }
+  .replay-bar.visible { display: flex; }
+  .replay-bar input[type="range"] {
+    flex: 1; accent-color: #2B5CE6; cursor: pointer;
+  }
+  .replay-bar .replay-label {
+    font-size: 11px; color: #666; min-width: 60px;
+    font-variant-numeric: tabular-nums;
+  }
+  .replay-bar .replay-speed {
+    font-size: 11px; color: #555; padding: 2px 6px;
+    border: 1px solid #333; border-radius: 3px; cursor: pointer;
+    background: transparent;
+  }
+  .replay-bar .replay-speed:hover { color: #aaa; border-color: #555; }
+
+  /* Main layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  .wrapper { display: flex; flex-direction: column; height: 100vh; }
 
   /* Left panel — goal timeline */
   .left-panel {
@@ -170,7 +226,7 @@ function buildHtml(
   }
 
   .panel-header {
-    padding: 16px 16px 12px;
+    padding: 14px 16px 10px;
     border-bottom: 1px solid #2a2a4a;
     flex-shrink: 0;
   }
@@ -197,12 +253,24 @@ function buildHtml(
     border: 1px solid transparent;
     transition: all 0.15s ease;
     font-size: 13px;
+    position: relative;
   }
   .goal-item:hover { background: #1e1e3a; border-color: #333; }
   .goal-item.active {
     background: #1a2a4a; border-color: #2B5CE6;
     box-shadow: 0 0 0 1px rgba(43, 92, 230, 0.3);
   }
+  .goal-item.forked {
+    border-color: #E07020;
+    box-shadow: 0 0 0 1px rgba(224, 112, 32, 0.3);
+  }
+  .goal-item.forked::after {
+    content: '⑂ fork point';
+    position: absolute; top: -8px; right: 8px;
+    font-size: 9px; color: #E07020; background: #16162b;
+    padding: 0 4px; letter-spacing: 0.5px;
+  }
+  .goal-item.dimmed { opacity: 0.3; }
   .goal-num { color: #555; font-size: 11px; min-width: 24px; font-variant-numeric: tabular-nums; }
   .goal-icon { color: #2B5CE6; flex-shrink: 0; }
   .goal-mid { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
@@ -212,6 +280,14 @@ function buildHtml(
     background: #2a2a4a; color: #888; font-size: 11px;
     padding: 1px 6px; border-radius: 10px; flex-shrink: 0;
   }
+  .fork-btn {
+    background: none; border: none; color: #444; cursor: pointer;
+    font-size: 14px; padding: 2px; border-radius: 3px;
+    opacity: 0; transition: opacity 0.15s;
+    flex-shrink: 0;
+  }
+  .goal-item:hover .fork-btn { opacity: 1; }
+  .fork-btn:hover { color: #E07020; }
 
   /* Right panel — tree view */
   .right-panel {
@@ -220,7 +296,7 @@ function buildHtml(
   }
 
   .tree-header {
-    padding: 16px 24px 12px;
+    padding: 14px 24px 10px;
     border-bottom: 1px solid #2a2a4a;
     flex-shrink: 0;
   }
@@ -245,14 +321,11 @@ function buildHtml(
   }
 
   /* Tree nodes */
-  .tree-root {
-    padding-left: 0;
-  }
+  .tree-root { padding-left: 0; }
   .tree-node {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 12px; margin: 4px 0;
-    border-radius: 6px;
-    position: relative;
+    border-radius: 6px; position: relative;
     transition: background 0.1s;
   }
   .tree-node:hover { background: rgba(255,255,255,0.03); }
@@ -274,8 +347,7 @@ function buildHtml(
 
   /* Connector lines */
   .tree-children {
-    margin-left: 20px;
-    padding-left: 16px;
+    margin-left: 20px; padding-left: 16px;
     border-left: 1px solid #2a2a4a;
   }
 
@@ -291,9 +363,23 @@ function buildHtml(
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   }
 
+  /* Toast notification */
+  .toast {
+    position: fixed; bottom: 20px; left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: #2B5CE6; color: #fff;
+    padding: 8px 20px; border-radius: 6px;
+    font-size: 13px; opacity: 0;
+    transition: all 0.3s ease; z-index: 200;
+    pointer-events: none;
+  }
+  .toast.show {
+    opacity: 1; transform: translateX(-50%) translateY(0);
+  }
+
   /* Legend */
   .legend {
-    padding: 12px 16px; border-top: 1px solid #2a2a4a;
+    padding: 10px 16px; border-top: 1px solid #2a2a4a;
     display: flex; gap: 12px; flex-wrap: wrap;
     font-size: 11px; color: #666; flex-shrink: 0;
   }
@@ -302,63 +388,112 @@ function buildHtml(
 
   /* Responsive */
   @media (max-width: 768px) {
-    .container { flex-direction: column; }
+    .main { flex-direction: column; }
     .left-panel { width: 100%; max-width: none; height: 40%; min-width: auto; border-right: none; border-bottom: 1px solid #2a2a4a; }
     .right-panel { height: 60%; }
+    .toolbar { padding: 0 8px; }
+    .toolbar .session-info { display: none; }
   }
 </style>
 </head>
 <body>
 
-<div class="container">
-  <div class="left-panel">
-    <div class="panel-header">
-      <h1>${escapeHtml(title)}</h1>
-      <div class="stats">
+<div class="wrapper">
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <a class="brand" href="https://github.com/operadhq/operad" target="_blank" rel="noopener"><span>operad</span> session graph</a>
+      <span class="session-info">
         <span class="val">${stats.goals}</span> goals · <span class="val">${stats.total}</span> nodes · <span class="val">${stats.relations}</span> edges
-      </div>
+      </span>
     </div>
-    <div class="goal-list">
-      ${goalListHtml}
+    <div class="toolbar-center">
+      <button class="tb-btn" id="btn-replay" title="Replay through goals sequentially">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="4,2 14,8 4,14" fill="currentColor" stroke="none"/></svg>
+        Replay
+      </button>
     </div>
-    <div class="legend">
-      <div class="legend-item"><div class="legend-dot" style="background:#2B5CE6"></div> Goal</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#2EA043"></div> File</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#E07020"></div> Patch</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#8B5CF6"></div> Test</div>
+    <div class="toolbar-right">
+      <button class="tb-btn" id="btn-download" title="Download this HTML file">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 13h10"/></svg>
+        Save
+      </button>
+      <button class="tb-btn" id="btn-share" title="Copy shareable link">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 8.5a3 3 0 004.5.5l2-2a3 3 0 00-4.24-4.24l-1.14 1.14"/><path d="M10 7.5a3 3 0 00-4.5-.5l-2 2a3 3 0 004.24 4.24l1.14-1.14"/></svg>
+        Share
+      </button>
     </div>
   </div>
 
-  <div class="right-panel">
-    <div class="tree-header">
-      <h2 id="tree-title">Select a goal</h2>
-      <div class="tree-stats" id="tree-stats"></div>
+  <!-- Replay bar (hidden by default) -->
+  <div class="replay-bar" id="replay-bar">
+    <button class="tb-btn" id="btn-replay-toggle" style="padding:4px 8px" title="Play / Pause">▶</button>
+    <input type="range" id="replay-scrubber" min="0" max="${Math.max(0, stats.goals - 1)}" value="0">
+    <span class="replay-label" id="replay-label">1 / ${stats.goals}</span>
+    <button class="replay-speed" id="replay-speed" title="Playback speed">1×</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="main">
+    <div class="left-panel">
+      <div class="panel-header">
+        <h1>${escapeHtml(title)}</h1>
+        <div class="stats">
+          <span class="val">${stats.goals}</span> goals · <span class="val">${stats.files}</span> files · <span class="val">${stats.patches}</span> patches · <span class="val">${stats.testRuns}</span> tests
+        </div>
+      </div>
+      <div class="goal-list" id="goal-list">
+        ${goalListHtml}
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#2B5CE6"></div> Goal</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2EA043"></div> File</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#E07020"></div> Patch</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#8B5CF6"></div> Test</div>
+      </div>
     </div>
-    <div class="tree-content" id="tree-content">
-      <div class="tree-empty">← Click a goal to view its dependency tree</div>
+
+    <div class="right-panel">
+      <div class="tree-header">
+        <h2 id="tree-title">Select a goal</h2>
+        <div class="tree-stats" id="tree-stats"></div>
+      </div>
+      <div class="tree-content" id="tree-content">
+        <div class="tree-empty">← Click a goal to view its dependency tree</div>
+      </div>
     </div>
   </div>
 </div>
 
 <div class="tooltip" id="tooltip"></div>
+<div class="toast" id="toast"></div>
 
 <script>
 (function() {
   var goalChildren = ${JSON.stringify(goalChildren)};
   var nodeData = ${JSON.stringify(nodeData)};
-
   var icons = { goal: '★', file: '📄', patch: '✏️', test_run: '🧪' };
+  var totalGoals = ${stats.goals};
 
   var goalItems = document.querySelectorAll('.goal-item');
   var treeTitle = document.getElementById('tree-title');
   var treeStats = document.getElementById('tree-stats');
   var treeContent = document.getElementById('tree-content');
   var tooltip = document.getElementById('tooltip');
+  var toast = document.getElementById('toast');
 
   var selectedId = null;
+  var forkPointId = null;
 
+  // ─── Toast ──────────────────────────────────────────────
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(function() { toast.classList.remove('show'); }, 2000);
+  }
+
+  // ─── Select Goal ────────────────────────────────────────
   function selectGoal(goalId) {
-    // Update selection state
     selectedId = goalId;
     for (var i = 0; i < goalItems.length; i++) {
       goalItems[i].classList.toggle('active', goalItems[i].getAttribute('data-id') === goalId);
@@ -367,12 +502,9 @@ function buildHtml(
     var node = nodeData[goalId];
     if (!node) return;
 
-    // Update header
     treeTitle.innerHTML = '<span style="color:#2B5CE6">★</span> ' + escapeHtml(node.label);
-
     var children = goalChildren[goalId] || [];
 
-    // Count types
     var counts = { file: 0, patch: 0, test_run: 0 };
     for (var i = 0; i < children.length; i++) {
       var child = nodeData[children[i].targetId];
@@ -385,14 +517,12 @@ function buildHtml(
     if (counts.test_run > 0) statParts.push(counts.test_run + ' test' + (counts.test_run > 1 ? 's' : ''));
     treeStats.textContent = statParts.length > 0 ? statParts.join(' · ') : 'No children';
 
-    // Render tree
     if (children.length === 0) {
       treeContent.innerHTML = '<div class="tree-empty">This goal has no connected nodes</div>';
       return;
     }
 
-    var html = '<div class="tree-root">';
-    html += '<div class="tree-children">';
+    var html = '<div class="tree-root"><div class="tree-children">';
     for (var i = 0; i < children.length; i++) {
       var edge = children[i];
       var child = nodeData[edge.targetId];
@@ -408,19 +538,168 @@ function buildHtml(
     treeContent.innerHTML = html;
   }
 
-  // Click handlers for goal list
-  for (var i = 0; i < goalItems.length; i++) {
-    goalItems[i].addEventListener('click', function() {
-      selectGoal(this.getAttribute('data-id'));
-    });
+  // ─── Fork Point ─────────────────────────────────────────
+  function setForkPoint(goalId) {
+    if (forkPointId === goalId) {
+      // Toggle off
+      forkPointId = null;
+      for (var i = 0; i < goalItems.length; i++) {
+        goalItems[i].classList.remove('forked', 'dimmed');
+      }
+      showToast('Fork point cleared');
+      return;
+    }
+
+    forkPointId = goalId;
+    var foundFork = false;
+    for (var i = 0; i < goalItems.length; i++) {
+      var id = goalItems[i].getAttribute('data-id');
+      goalItems[i].classList.remove('forked', 'dimmed');
+      if (id === goalId) {
+        goalItems[i].classList.add('forked');
+        foundFork = true;
+      } else if (foundFork) {
+        goalItems[i].classList.add('dimmed');
+      }
+    }
+    showToast('Fork point set at goal #' + (parseInt(document.querySelector('[data-id="' + goalId + '"]').getAttribute('data-index')) + 1));
   }
+
+  // ─── Replay ─────────────────────────────────────────────
+  var replayBar = document.getElementById('replay-bar');
+  var replayBtn = document.getElementById('btn-replay');
+  var replayToggle = document.getElementById('btn-replay-toggle');
+  var scrubber = document.getElementById('replay-scrubber');
+  var replayLabel = document.getElementById('replay-label');
+  var speedBtn = document.getElementById('replay-speed');
+  var replayActive = false;
+  var replayPlaying = false;
+  var replayTimer = null;
+  var replayIndex = 0;
+  var speeds = [1, 2, 4, 0.5];
+  var speedIndex = 0;
+
+  replayBtn.addEventListener('click', function() {
+    replayActive = !replayActive;
+    replayBar.classList.toggle('visible', replayActive);
+    replayBtn.classList.toggle('active', replayActive);
+    if (replayActive) {
+      replayIndex = 0;
+      scrubber.value = 0;
+      updateReplayLabel();
+      if (goalItems.length > 0) selectGoal(goalItems[0].getAttribute('data-id'));
+    } else {
+      stopReplay();
+    }
+  });
+
+  replayToggle.addEventListener('click', function() {
+    if (replayPlaying) {
+      stopReplay();
+    } else {
+      startReplay();
+    }
+  });
+
+  scrubber.addEventListener('input', function() {
+    replayIndex = parseInt(this.value);
+    updateReplayLabel();
+    if (goalItems[replayIndex]) {
+      selectGoal(goalItems[replayIndex].getAttribute('data-id'));
+      goalItems[replayIndex].scrollIntoView({ block: 'nearest' });
+    }
+  });
+
+  speedBtn.addEventListener('click', function() {
+    speedIndex = (speedIndex + 1) % speeds.length;
+    speedBtn.textContent = speeds[speedIndex] + '×';
+    if (replayPlaying) { stopReplay(); startReplay(); }
+  });
+
+  function startReplay() {
+    replayPlaying = true;
+    replayToggle.textContent = '⏸';
+    advanceReplay();
+  }
+
+  function stopReplay() {
+    replayPlaying = false;
+    replayToggle.textContent = '▶';
+    if (replayTimer) { clearTimeout(replayTimer); replayTimer = null; }
+  }
+
+  function advanceReplay() {
+    if (!replayPlaying || replayIndex >= totalGoals) {
+      stopReplay();
+      return;
+    }
+    if (goalItems[replayIndex]) {
+      selectGoal(goalItems[replayIndex].getAttribute('data-id'));
+      goalItems[replayIndex].scrollIntoView({ block: 'nearest' });
+      scrubber.value = replayIndex;
+      updateReplayLabel();
+    }
+    replayIndex++;
+    replayTimer = setTimeout(advanceReplay, 1200 / speeds[speedIndex]);
+  }
+
+  function updateReplayLabel() {
+    replayLabel.textContent = (parseInt(scrubber.value) + 1) + ' / ' + totalGoals;
+  }
+
+  // ─── Share & Download ───────────────────────────────────
+  document.getElementById('btn-share').addEventListener('click', function() {
+    // Copy the current page URL or the full HTML as a blob URL
+    if (window.location.protocol === 'file:') {
+      // File URL — create a blob URL the user can bookmark
+      var blob = new Blob([document.documentElement.outerHTML], { type: 'text/html' });
+      var url = URL.createObjectURL(blob);
+      // Try clipboard
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(window.location.href).then(function() {
+          showToast('File path copied to clipboard');
+        }).catch(function() {
+          showToast('File: ' + window.location.href.replace('file://', ''));
+        });
+      } else {
+        showToast('File: ' + window.location.href.replace('file://', ''));
+      }
+    } else {
+      navigator.clipboard.writeText(window.location.href).then(function() {
+        showToast('Link copied to clipboard');
+      });
+    }
+  });
+
+  document.getElementById('btn-download').addEventListener('click', function() {
+    var html = '<!DOCTYPE html>' + document.documentElement.outerHTML;
+    var blob = new Blob([html], { type: 'text/html' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'operad-session-graph.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Downloaded operad-session-graph.html');
+  });
+
+  // ─── Click Handlers ─────────────────────────────────────
+  document.getElementById('goal-list').addEventListener('click', function(e) {
+    var forkBtn = e.target.closest('.fork-btn');
+    if (forkBtn) {
+      e.stopPropagation();
+      setForkPoint(forkBtn.getAttribute('data-id'));
+      return;
+    }
+    var item = e.target.closest('.goal-item');
+    if (item) selectGoal(item.getAttribute('data-id'));
+  });
 
   // Auto-select first goal
   if (goalItems.length > 0) {
     selectGoal(goalItems[0].getAttribute('data-id'));
   }
 
-  // Tooltip on hover for tree nodes
+  // ─── Tooltip ────────────────────────────────────────────
   treeContent.addEventListener('mouseover', function(e) {
     var node = e.target.closest('.tree-node');
     if (!node) { tooltip.style.display = 'none'; return; }
@@ -439,12 +718,10 @@ function buildHtml(
   });
 
   treeContent.addEventListener('mouseout', function(e) {
-    if (!e.target.closest('.tree-node')) {
-      tooltip.style.display = 'none';
-    }
+    if (!e.target.closest('.tree-node')) tooltip.style.display = 'none';
   });
 
-  // Keyboard navigation
+  // ─── Keyboard Navigation ────────────────────────────────
   document.addEventListener('keydown', function(e) {
     if (!selectedId) return;
     var currentIndex = -1;
@@ -463,6 +740,9 @@ function buildHtml(
         selectGoal(goalItems[currentIndex - 1].getAttribute('data-id'));
         goalItems[currentIndex - 1].scrollIntoView({ block: 'nearest' });
       }
+    } else if (e.key === ' ' && replayActive) {
+      e.preventDefault();
+      replayPlaying ? stopReplay() : startReplay();
     }
   });
 
