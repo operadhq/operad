@@ -7,18 +7,22 @@
  *   log [--graph <id>]        Show event history (like git log)
  *   blame [--graph <id>]      Show cost per goal
  *   diff <graph-a> <graph-b>  Compare two sessions
+ *   view [--graph <id>]       Open interactive graph in browser (vis.js)
  *   stash [--graph <id>]      Show wasted work (redundant reads)
  *   revert <event-id>         Revert to a point (compensating events)
  *   explore <event-id> -n 3   Fork N branches from a point
  */
-import { readFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir, platform } from 'node:os'
+import { execSync } from 'node:child_process'
 import { createRuntime } from '@operad/core'
 import type { GraphEvent, GraphDiff, RevertResult, ExploreResult } from '@operad/core'
 import { SqliteAdapter } from '@operad/adapter-sqlite'
 import { commit } from './session.js'
 import { detectStash } from './waste.js'
+import { renderHtmlGraph } from './render-html.js'
+import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -660,6 +664,77 @@ async function cmdExplore(positional: string[], flags: Record<string, string | b
   console.log(`${c.green}Winner:${c.reset} ${c.bold}${result.winnerId}${c.reset} (score: ${result.winnerScore.toFixed(3)})`)
 }
 
+async function cmdView(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session view --graph <id>`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+
+  // Objects + relations were projected during `commit` — just query them
+  let objects = await storage.queryObjects(graphId, {})
+  let relations = await storage.queryRelations(graphId, {})
+
+  if (objects.length === 0) {
+    // Fallback: maybe only events exist (committed with older version)
+    // Re-project from events
+    const events = await storage.queryEvents(graphId, {})
+    if (events.length === 0) {
+      console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+      storage.close()
+      process.exit(0)
+    }
+
+    const runtime = createRuntime({ storage })
+    const graph = runtime.getGraph(graphId)
+    const { projectGraph } = await import('./projector.js')
+    await projectGraph(graph, events)
+
+    objects = await storage.queryObjects(graphId, {})
+    relations = await storage.queryRelations(graphId, {})
+  }
+  storage.close()
+
+  const renderableObjects: RenderableObject[] = objects.map((o) => ({
+    id: o.id,
+    type: o.type,
+    data: o.data as Record<string, unknown>,
+  }))
+
+  const renderableRelations: RenderableRelation[] = relations.map((r) => ({
+    sourceId: r.sourceId,
+    targetId: r.targetId,
+    type: r.type,
+  }))
+
+  const html = renderHtmlGraph(renderableObjects, renderableRelations, {
+    title: `Session: ${graphId}`,
+  })
+
+  // Write output
+  const outputPath = (flags['output'] as string)
+    ? resolve(flags['output'] as string)
+    : join(tmpdir(), `operad-graph-${graphId.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`)
+
+  writeFileSync(outputPath, html, 'utf-8')
+  console.log(`${c.green}Wrote${c.reset} ${outputPath}`)
+  console.log(`${c.dim}${renderableObjects.length} nodes, ${renderableRelations.length} edges${c.reset}`)
+
+  // Auto-open in browser unless --no-open
+  if (!flags['no-open']) {
+    try {
+      const cmd = platform() === 'darwin' ? 'open' : 'xdg-open'
+      execSync(`${cmd} "${outputPath}"`, { stdio: 'ignore' })
+      console.log(`${c.cyan}Opened${c.reset} in default browser`)
+    } catch {
+      console.log(`${c.yellow}Could not auto-open.${c.reset} Open manually: ${outputPath}`)
+    }
+  }
+}
+
 // ─── Stash Helpers ──────────────────────────────────────────────────────────
 
 interface FileReadInfo {
@@ -728,6 +803,7 @@ ${c.bold}COMMANDS${c.reset}
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
+  ${c.green}view${c.reset} --graph <id>              Open interactive graph in browser (vis.js)
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
 
 ${c.bold}GLOBAL OPTIONS${c.reset}
@@ -750,6 +826,12 @@ ${c.bold}EXAMPLES${c.reset}
 
   ${c.dim}# Compare two sessions${c.reset}
   operad-session diff session_a session_b
+
+  ${c.dim}# Open interactive graph in browser${c.reset}
+  operad-session view --graph session_1716000000000
+
+  ${c.dim}# Export graph to file without opening${c.reset}
+  operad-session view --graph session_1716000000000 --output graph.html --no-open
 
   ${c.dim}# Find wasted reads${c.reset}
   operad-session stash --graph session_1716000000000
@@ -802,6 +884,9 @@ async function main() {
       break
     case 'explore':
       await cmdExplore(positional, flags)
+      break
+    case 'view':
+      await cmdView(positional, flags)
       break
     default:
       // Backward compat: if it looks like a file path, treat as commit
