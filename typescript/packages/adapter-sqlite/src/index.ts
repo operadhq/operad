@@ -59,7 +59,7 @@ export class SqliteAdapter implements StorageAdapter {
         graph_id TEXT NOT NULL,
         type TEXT NOT NULL,
         payload TEXT NOT NULL DEFAULT '{}',
-        caused_by TEXT REFERENCES operad_events(id),
+        caused_by TEXT,
         timestamp TEXT NOT NULL,
         actor TEXT
       );
