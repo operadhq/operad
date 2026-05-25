@@ -21,7 +21,7 @@ export { createRuntime } from '@operad/core'
 export { MemoryAdapter } from '@operad/adapter-memory'
 
 // Visualization
-export { renderHtmlGraph, type RenderHtmlOptions } from './render-html.js'
+export { renderHtmlGraph, type RenderHtmlOptions, type BranchInfo, type DiffEntry } from './render-html.js'
 
 // Subsystems (for advanced usage)
 export { parseAndEmit, type ParseStats } from './parser.js'

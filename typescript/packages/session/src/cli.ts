@@ -3,14 +3,18 @@
  * operad-session — Git-like CLI for agent session graphs.
  *
  * Subcommands:
- *   commit <path.jsonl>       Import JSONL into the persistent graph
- *   log [--graph <id>]        Show event history (like git log)
- *   blame [--graph <id>]      Show cost per goal
- *   diff <graph-a> <graph-b>  Compare two sessions
- *   view [--graph <id>]       Open interactive graph in browser (vis.js)
- *   stash [--graph <id>]      Show wasted work (redundant reads)
- *   revert <event-id>         Revert to a point (compensating events)
- *   explore <event-id> -n 3   Fork N branches from a point
+ *   commit <path.jsonl>         Import JSONL into the persistent graph
+ *   inspect [--event <id>]      Show run summary or single event detail
+ *   log [--graph <id>]          Show event history (like git log)
+ *   blame [--graph <id>]        Show cost per goal
+ *   diff <graph-a> <graph-b>    Compare two sessions
+ *   fork --at-event <evt>       Fork a session at an event
+ *   replay [--to-event <evt>]   Rebuild graph from events (time-travel)
+ *   export-trace [--format]     Export trace as JSONL or text
+ *   view [--graph <id>]         Open interactive timeline in browser
+ *   stash [--graph <id>]        Show wasted work (redundant reads)
+ *   revert <event-id>           Revert to a point (compensating events)
+ *   explore <event-id> -n 3     Fork N branches from a point
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
@@ -664,6 +668,270 @@ async function cmdExplore(positional: string[], flags: Record<string, string | b
   console.log(`${c.green}Winner:${c.reset} ${c.bold}${result.winnerId}${c.reset} (score: ${result.winnerScore.toFixed(3)})`)
 }
 
+async function cmdInspect(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session inspect --graph <id> [--event <evt-id>]`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    storage.close()
+    process.exit(0)
+  }
+
+  // If --event specified, show single event detail
+  const eventId = flags['event'] as string | undefined
+  if (eventId) {
+    const event = events.find((e) => e.id === eventId || e.id.startsWith(eventId))
+    storage.close()
+    if (!event) {
+      console.error(`${c.red}Error:${c.reset} Event not found: ${eventId}`)
+      process.exit(1)
+    }
+    if (flags['json']) {
+      console.log(JSON.stringify(event, null, 2))
+      return
+    }
+    console.log(`${c.bold}Event:${c.reset} ${c.yellow}${event.id}${c.reset}`)
+    console.log(`${c.bold}Type:${c.reset}  ${c.cyan}${event.type}${c.reset}`)
+    console.log(`${c.bold}Time:${c.reset}  ${formatTimestamp(event.timestamp)}`)
+    console.log(`${c.bold}Actor:${c.reset} ${event.actor ?? 'runtime'}`)
+    if (event.causedBy) {
+      console.log(`${c.bold}Caused by:${c.reset} ${c.dim}${event.causedBy}${c.reset}`)
+    }
+    console.log()
+    console.log(`${c.bold}Payload:${c.reset}`)
+    console.log(JSON.stringify(event.payload, null, 2))
+    return
+  }
+
+  // Otherwise show run summary (like ActiveGraph's inspect)
+  storage.close()
+
+  const goalEvents = events.filter((e) => e.type === 'goal.set')
+  const toolEvents = events.filter((e) => e.type === 'custom.tool_called')
+  const blameEvents = events.filter((e) => e.type === 'custom.blame_recorded')
+  const totalCost = blameEvents.reduce((sum, e) => sum + ((e.payload.cost as number) ?? 0), 0)
+  const firstTs = events[0].timestamp
+  const lastTs = events[events.length - 1].timestamp
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      graphId,
+      state: 'committed',
+      events: events.length,
+      goals: goalEvents.length,
+      toolCalls: toolEvents.length,
+      totalCost,
+      firstEvent: firstTs,
+      lastEvent: lastTs,
+      tailEvents: events.slice(-5).map((e) => ({ id: e.id, type: e.type, timestamp: e.timestamp })),
+    }, null, 2))
+    return
+  }
+
+  console.log(`${c.bold}Inspect:${c.reset} ${c.yellow}${graphId}${c.reset}`)
+  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}State:${c.reset}       committed`)
+  console.log(`  ${c.bold}Events:${c.reset}      ${events.length}`)
+  console.log(`  ${c.bold}Goals:${c.reset}       ${goalEvents.length}`)
+  console.log(`  ${c.bold}Tool calls:${c.reset}  ${toolEvents.length}`)
+  console.log(`  ${c.bold}Total cost:${c.reset}  $${totalCost.toFixed(2)}`)
+  console.log(`  ${c.bold}First event:${c.reset} ${formatTimestamp(firstTs)}`)
+  console.log(`  ${c.bold}Last event:${c.reset}  ${formatTimestamp(lastTs)}`)
+  console.log()
+
+  // Tail of recent events
+  const tail = parseInt(flags['tail'] as string ?? '5', 10)
+  console.log(`  ${c.bold}Recent events (tail ${tail}):${c.reset}`)
+  for (const event of events.slice(-tail)) {
+    const shortId = event.id.slice(0, 12)
+    console.log(`    ${c.dim}${shortId}${c.reset} ${c.cyan}${event.type}${c.reset} ${c.dim}${formatTimestamp(event.timestamp)}${c.reset}`)
+  }
+}
+
+async function cmdFork(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = flags['graph'] as string | undefined
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} --graph is required.`)
+    console.error(`Usage: operad-session fork --graph <id> --at-event <evt> [--label <name>]`)
+    process.exit(1)
+  }
+
+  const atEvent = (flags['at-event'] as string) ?? positional[0]
+  if (!atEvent) {
+    console.error(`${c.red}Error:${c.reset} --at-event is required.`)
+    console.error(`Usage: operad-session fork --graph <id> --at-event <evt> [--label <name>]`)
+    process.exit(1)
+  }
+
+  const label = (flags['label'] as string) ?? 'fork'
+
+  const storage = getStorage()
+  const runtime = createRuntime({ storage })
+
+  let branchGraph: Awaited<ReturnType<typeof runtime.branch>>
+  try {
+    branchGraph = await runtime.branch(graphId, {
+      atEvent,
+      label,
+    })
+  } catch (err) {
+    console.error(`${c.red}Error:${c.reset} ${(err as Error).message}`)
+    storage.close()
+    process.exit(1)
+  }
+
+  storage.close()
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      parentGraphId: graphId,
+      forkGraphId: branchGraph.id,
+      atEvent,
+      label,
+    }, null, 2))
+    return
+  }
+
+  console.log(`${c.green}Forked${c.reset} ${c.yellow}${graphId}${c.reset} at event ${c.cyan}${atEvent.slice(0, 12)}${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}New graph:${c.reset} ${c.cyan}${branchGraph.id}${c.reset}`)
+  console.log(`  ${c.bold}Label:${c.reset}     ${label}`)
+  console.log()
+  console.log(`${c.dim}Use "operad-session diff ${graphId} ${branchGraph.id}" to compare after making changes.${c.reset}`)
+}
+
+async function cmdReplay(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session replay --graph <id> [--to-event <evt>]`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    storage.close()
+    process.exit(0)
+  }
+
+  const toEvent = flags['to-event'] as string | undefined
+
+  // Rebuild graph from events up to the specified point
+  const runtime = createRuntime({ storage })
+
+  if (toEvent) {
+    // Checkout to specific event
+    try {
+      await runtime.checkout(graphId, toEvent)
+    } catch (err) {
+      console.error(`${c.red}Error:${c.reset} ${(err as Error).message}`)
+      storage.close()
+      process.exit(1)
+    }
+  }
+
+  const objects = await storage.queryObjects(graphId, {})
+  const relations = await storage.queryRelations(graphId, {})
+  storage.close()
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      graphId,
+      replayedTo: toEvent ?? events[events.length - 1].id,
+      objects: objects.length,
+      relations: relations.length,
+      events: events.length,
+    }, null, 2))
+    return
+  }
+
+  const target = toEvent ? `event ${toEvent.slice(0, 12)}` : 'latest'
+  console.log(`${c.bold}Replayed${c.reset} ${c.yellow}${graphId}${c.reset} to ${c.cyan}${target}${c.reset}`)
+  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}Events:${c.reset}    ${events.length}`)
+  console.log(`  ${c.bold}Objects:${c.reset}   ${objects.length}`)
+  console.log(`  ${c.bold}Relations:${c.reset} ${relations.length}`)
+
+  // Type breakdown
+  const byType: Record<string, number> = {}
+  for (const obj of objects) {
+    byType[obj.type] = (byType[obj.type] ?? 0) + 1
+  }
+  console.log()
+  console.log(`  ${c.bold}Object types:${c.reset}`)
+  for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${String(count).padStart(3)} ${type}`)
+  }
+}
+
+async function cmdExportTrace(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session export-trace --graph <id> [--format jsonl|text] [--out <path>]`)
+    process.exit(1)
+  }
+
+  const format = (flags['format'] as string) ?? 'jsonl'
+  const outPath = flags['out'] as string | undefined
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+  storage.close()
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    process.exit(0)
+  }
+
+  let output: string
+
+  if (format === 'jsonl') {
+    output = events.map((e) => JSON.stringify(e)).join('\n') + '\n'
+  } else {
+    // Text format: human-readable trace
+    const lines: string[] = []
+    lines.push(`# Trace: ${graphId}`)
+    lines.push(`# Events: ${events.length}`)
+    lines.push(`# Exported: ${new Date().toISOString()}`)
+    lines.push('')
+
+    for (const event of events) {
+      const ts = formatTimestamp(event.timestamp)
+      const actor = event.actor ?? 'runtime'
+      lines.push(`[${ts}] ${event.type} (${actor})`)
+
+      if (event.payload.goal) lines.push(`  goal: ${event.payload.goal}`)
+      if (event.payload.tool) lines.push(`  tool: ${event.payload.tool}`)
+      if (event.payload.file_path) lines.push(`  file: ${event.payload.file_path}`)
+      if (event.payload.cost) lines.push(`  cost: $${(event.payload.cost as number).toFixed(4)}`)
+      lines.push('')
+    }
+    output = lines.join('\n')
+  }
+
+  if (outPath) {
+    writeFileSync(resolve(outPath), output, 'utf-8')
+    console.error(`${c.green}Exported${c.reset} ${events.length} events to ${outPath} (${format})`)
+  } else {
+    // Write to stdout
+    process.stdout.write(output)
+  }
+}
+
 async function cmdView(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
   const graphId = (flags['graph'] as string) ?? positional[0]
   if (!graphId) {
@@ -797,13 +1065,18 @@ ${c.bold}USAGE${c.reset}
 
 ${c.bold}COMMANDS${c.reset}
   ${c.green}commit${c.reset} <path.jsonl>          Import JSONL into the persistent graph
+  ${c.green}inspect${c.reset} --graph <id>          Show run summary (events, goals, cost, tail)
+  ${c.green}inspect${c.reset} --graph <id> --event <evt>  Show full payload for one event
   ${c.green}graph${c.reset} --graph <id>            Show ASCII event graph (turn-based view)
   ${c.green}log${c.reset} --graph <id>             Show event history (like git log)
   ${c.green}blame${c.reset} --graph <id>           Show cost per goal (which goal spent how much)
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
+  ${c.green}fork${c.reset} --graph <id> --at-event <evt>  Fork a session at an event
+  ${c.green}replay${c.reset} --graph <id>           Rebuild graph from events (time-travel)
+  ${c.green}export-trace${c.reset} --graph <id>     Export trace as JSONL or text
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
-  ${c.green}view${c.reset} --graph <id>              Open interactive graph in browser (vis.js)
+  ${c.green}view${c.reset} --graph <id>            Open interactive timeline in browser
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
 
 ${c.bold}GLOBAL OPTIONS${c.reset}
@@ -815,29 +1088,35 @@ ${c.bold}STORAGE${c.reset}
   All data is persisted to: ${c.dim}${DB_PATH}${c.reset}
 
 ${c.bold}EXAMPLES${c.reset}
-  ${c.dim}# Import a session${c.reset}
+  ${c.dim}# Import a Claude Code session${c.reset}
   operad-session commit ~/.claude/projects/myapp/session.jsonl
 
-  ${c.dim}# View event log${c.reset}
-  operad-session log --graph session_1716000000000
+  ${c.dim}# Inspect a session${c.reset}
+  operad-session inspect --graph session_1716000000000
+
+  ${c.dim}# View a single event's full payload${c.reset}
+  operad-session inspect --graph session_1716000000000 --event evt_17160000
+
+  ${c.dim}# Fork at an event (what-if analysis)${c.reset}
+  operad-session fork --graph session_1716000000000 --at-event evt_17160000 --label cautious
+
+  ${c.dim}# Compare parent vs fork${c.reset}
+  operad-session diff session_1716000000000 session_1716000000000_cautious
+
+  ${c.dim}# Replay to a specific point (time-travel)${c.reset}
+  operad-session replay --graph session_1716000000000 --to-event evt_17160000
+
+  ${c.dim}# Export trace as JSONL (pipe to other tools)${c.reset}
+  operad-session export-trace --graph session_1716000000000 --format jsonl --out trace.jsonl
+
+  ${c.dim}# Open interactive timeline in browser${c.reset}
+  operad-session view --graph session_1716000000000
 
   ${c.dim}# See cost breakdown per goal${c.reset}
   operad-session blame --graph session_1716000000000
 
-  ${c.dim}# Compare two sessions${c.reset}
-  operad-session diff session_a session_b
-
-  ${c.dim}# Open interactive graph in browser${c.reset}
-  operad-session view --graph session_1716000000000
-
-  ${c.dim}# Export graph to file without opening${c.reset}
-  operad-session view --graph session_1716000000000 --output graph.html --no-open
-
   ${c.dim}# Find wasted reads${c.reset}
   operad-session stash --graph session_1716000000000
-
-  ${c.dim}# Revert to a specific point${c.reset}
-  operad-session revert evt_17160000 --graph session_1716000000000
 
   ${c.dim}# Explore 3 branches from a point${c.reset}
   operad-session explore evt_17160000 -n 3 --graph session_1716000000000
@@ -864,6 +1143,9 @@ async function main() {
     case 'commit':
       await cmdCommit(positional, flags)
       break
+    case 'inspect':
+      await cmdInspect(positional, flags)
+      break
     case 'graph':
       await cmdGraph(positional, flags)
       break
@@ -875,6 +1157,15 @@ async function main() {
       break
     case 'diff':
       await cmdDiff(positional, flags)
+      break
+    case 'fork':
+      await cmdFork(positional, flags)
+      break
+    case 'replay':
+      await cmdReplay(positional, flags)
+      break
+    case 'export-trace':
+      await cmdExportTrace(positional, flags)
       break
     case 'stash':
       await cmdStash(positional, flags)

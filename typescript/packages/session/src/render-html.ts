@@ -11,9 +11,33 @@ import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export interface DiffEntry {
+  objectId: string
+  type: string
+  status: 'added' | 'removed' | 'modified'
+  data?: Record<string, unknown>
+  sourceData?: Record<string, unknown>
+  targetData?: Record<string, unknown>
+}
+
+export interface BranchInfo {
+  /** Goal ID where the branch was created */
+  forkGoalId: string
+  /** Human label for the branch */
+  branchLabel: string
+  /** Object diffs between source and branch */
+  diffs: DiffEntry[]
+  /** Event count on source after fork */
+  sourceEventsAfterFork: number
+  /** Event count on branch after fork */
+  branchEventsAfterFork: number
+}
+
 export interface RenderHtmlOptions {
   /** Title shown in the page header */
   title?: string
+  /** Branch/diff data to embed for interactive diff view */
+  branch?: BranchInfo
 }
 
 // ─── Node Colors ─────────────────────────────────────────────────────────────
@@ -83,7 +107,7 @@ export function renderHtmlGraph(
     relations: relations.length,
   }
 
-  return buildHtml(title, goals, goalChildren, nodeData, stats)
+  return buildHtml(title, goals, goalChildren, nodeData, stats, options?.branch ?? null)
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -135,6 +159,7 @@ function buildHtml(
   goalChildren: Record<string, Array<{ targetId: string; edgeLabel: string }>>,
   nodeData: Record<string, { id: string; type: string; label: string; tooltip: string }>,
   stats: Record<string, number>,
+  branch: BranchInfo | null,
 ): string {
   // Build goal list HTML server-side
   const goalListHtml = goals.map((g, i) => {
@@ -386,6 +411,48 @@ function buildHtml(
   .legend-item { display: flex; align-items: center; gap: 4px; }
   .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
 
+  /* Diff panel */
+  .diff-panel {
+    display: none; flex-direction: column;
+    border-left: 1px solid #2a2a4a; width: 320px;
+    background: #14142a; flex-shrink: 0;
+  }
+  .diff-panel.visible { display: flex; }
+  .diff-header {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
+  }
+  .diff-header h3 { font-size: 13px; color: #E07020; font-weight: 600; }
+  .diff-header .diff-stats { font-size: 11px; color: #666; margin-top: 4px; }
+
+  .diff-list {
+    flex: 1; overflow-y: auto; padding: 8px;
+  }
+  .diff-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; margin: 2px 0;
+    border-radius: 4px; font-size: 12px;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .diff-item .diff-status {
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .diff-item .diff-status.added { background: #1a3a1a; color: #4ade80; }
+  .diff-item .diff-status.removed { background: #3a1a1a; color: #f87171; }
+  .diff-item .diff-status.modified { background: #3a2a1a; color: #fbbf24; }
+  .diff-item .diff-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #aaa;
+  }
+  .diff-item .diff-type { color: #555; font-size: 10px; flex-shrink: 0; }
+
+  .diff-summary {
+    padding: 10px 16px; border-top: 1px solid #2a2a4a;
+    font-size: 11px; color: #555; flex-shrink: 0;
+  }
+
   /* Responsive */
   @media (max-width: 768px) {
     .main { flex-direction: column; }
@@ -462,6 +529,16 @@ function buildHtml(
         <div class="tree-empty">← Click a goal to view its dependency tree</div>
       </div>
     </div>
+
+    <!-- Diff panel (hidden until branch data + fork click) -->
+    <div class="diff-panel" id="diff-panel">
+      <div class="diff-header">
+        <h3>⑂ Branch Diff</h3>
+        <div class="diff-stats" id="diff-stats"></div>
+      </div>
+      <div class="diff-list" id="diff-list"></div>
+      <div class="diff-summary" id="diff-summary"></div>
+    </div>
   </div>
 </div>
 
@@ -472,6 +549,7 @@ function buildHtml(
 (function() {
   var goalChildren = ${JSON.stringify(goalChildren)};
   var nodeData = ${JSON.stringify(nodeData)};
+  var branchData = ${JSON.stringify(branch)};
   var icons = { goal: '★', file: '📄', patch: '✏️', test_run: '🧪' };
   var totalGoals = ${stats.goals};
 
@@ -538,14 +616,19 @@ function buildHtml(
     treeContent.innerHTML = html;
   }
 
-  // ─── Fork Point ─────────────────────────────────────────
+  // ─── Fork Point + Diff ───────────────────────────────────
+  var diffPanel = document.getElementById('diff-panel');
+  var diffList = document.getElementById('diff-list');
+  var diffStats = document.getElementById('diff-stats');
+  var diffSummary = document.getElementById('diff-summary');
+
   function setForkPoint(goalId) {
     if (forkPointId === goalId) {
-      // Toggle off
       forkPointId = null;
       for (var i = 0; i < goalItems.length; i++) {
         goalItems[i].classList.remove('forked', 'dimmed');
       }
+      diffPanel.classList.remove('visible');
       showToast('Fork point cleared');
       return;
     }
@@ -562,7 +645,61 @@ function buildHtml(
         goalItems[i].classList.add('dimmed');
       }
     }
-    showToast('Fork point set at goal #' + (parseInt(document.querySelector('[data-id="' + goalId + '"]').getAttribute('data-index')) + 1));
+
+    var goalNum = parseInt(document.querySelector('[data-id="' + goalId + '"]').getAttribute('data-index')) + 1;
+
+    // Show diff panel if branch data matches this fork point
+    if (branchData && branchData.forkGoalId === goalId) {
+      renderDiffPanel(branchData);
+      showToast('Fork point #' + goalNum + ' — diff loaded (' + branchData.diffs.length + ' changes)');
+    } else if (branchData) {
+      // Branch exists but at a different goal — still show fork marker
+      diffPanel.classList.remove('visible');
+      showToast('Fork point set at #' + goalNum + ' (branch data at different goal)');
+    } else {
+      diffPanel.classList.remove('visible');
+      showToast('Fork point set at #' + goalNum + ' — run branch() to see diff');
+    }
+  }
+
+  function renderDiffPanel(branch) {
+    diffPanel.classList.add('visible');
+
+    var added = 0, removed = 0, modified = 0;
+    var html = '';
+
+    for (var i = 0; i < branch.diffs.length; i++) {
+      var d = branch.diffs[i];
+      if (d.status === 'added') added++;
+      else if (d.status === 'removed') removed++;
+      else modified++;
+
+      var label = d.data ? summarizeDiffData(d.data) : d.objectId.slice(0, 16);
+      html += '<div class="diff-item">';
+      html += '<span class="diff-status ' + d.status + '">' + d.status + '</span>';
+      html += '<span class="diff-type">' + d.type + '</span>';
+      html += '<span class="diff-label" title="' + escapeHtml(label) + '">' + escapeHtml(label) + '</span>';
+      html += '</div>';
+    }
+
+    diffList.innerHTML = html || '<div style="padding:16px;color:#555;font-size:12px">No differences</div>';
+
+    diffStats.innerHTML = branch.branchLabel +
+      '<br>' + added + ' added · ' + removed + ' removed · ' + modified + ' modified';
+
+    diffSummary.innerHTML =
+      'Source: ' + branch.sourceEventsAfterFork + ' events after fork<br>' +
+      'Branch: ' + branch.branchEventsAfterFork + ' events after fork';
+  }
+
+  function summarizeDiffData(data) {
+    if (!data) return '?';
+    if (data.text) return String(data.text).slice(0, 40);
+    if (data.path) return String(data.path);
+    if (data.file) return String(data.file);
+    if (data.command) return String(data.command).slice(0, 40);
+    var keys = Object.keys(data);
+    return keys.slice(0, 2).join(', ');
   }
 
   // ─── Replay ─────────────────────────────────────────────

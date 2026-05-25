@@ -20,6 +20,7 @@ import { createRuntime } from '@operad/core'
 import type { RenderableObject, RenderableRelation } from '@operad/core'
 import { MemoryAdapter } from '@operad/adapter-memory'
 import { commit, renderHtmlGraph } from '@operad/session'
+import type { BranchInfo } from '@operad/session'
 
 // ─── Bundled Fixture ────────────────────────────────────────────────────────
 // A realistic Claude Code session: user asks to add auth, agent reads files,
@@ -251,9 +252,79 @@ async function main() {
     console.log(`  ~$${log.stash.potentialSavings.toFixed(2)} could be saved`)
   }
 
-  // ── Step 7: Open Visual Timeline ──────────────────────────────────
+  // ── Step 7: Branch + Diff — What-If Analysis ──────────────────────
 
-  console.log('\n── Step 6: view() — Open Timeline Viewer ──────────')
+  console.log('\n── Step 6: branch() + diff() — What-If Analysis ───')
+
+  // Find the first goal event to use as branch point
+  const allEvents = await storage.queryEvents(graphId, {})
+  const goalEvents = allEvents.filter((e) => e.type === 'goal.set')
+  const firstGoal = goals[0]
+  let branchInfo: BranchInfo | undefined
+
+  if (goalEvents.length >= 2) {
+    const branchPoint = goalEvents[0]
+    console.log(`  Branching at goal #1: "${(firstGoal.data.text as string).slice(0, 40)}..."`)
+
+    // Branch from the first goal
+    const branchGraph = await runtime.branch(graphId, {
+      atEvent: branchPoint.id,
+      label: 'what-if',
+    })
+
+    // Do alternate work on the branch
+    await branchGraph.addObject({
+      type: 'goal',
+      data: { text: 'Alternative: Use session tokens instead' },
+    })
+    await branchGraph.addObject({
+      type: 'file',
+      data: { path: '/src/lib/session.ts' },
+    })
+    const altPatch = await branchGraph.addObject({
+      type: 'patch',
+      data: { file: '/src/lib/session.ts', diff: '+export const session = { cookie: true }' },
+    })
+    await branchGraph.addObject({
+      type: 'test_run',
+      data: { command: 'pnpm vitest run src/session.test.ts', passed: true },
+    })
+
+    console.log('  Branch: added alternative approach (session tokens)')
+
+    // Diff
+    const diff = await runtime.diff(graphId, branchGraph.id)
+
+    const added = diff.objects.filter((d) => d.status === 'added').length
+    const removed = diff.objects.filter((d) => d.status === 'removed').length
+    const modified = diff.objects.filter((d) => d.status === 'modified').length
+
+    console.log(`  Diff: ${added} added, ${removed} removed, ${modified} modified`)
+    console.log(`  Source: ${diff.sourceLog.length} events after fork`)
+    console.log(`  Branch: ${diff.targetLog.length} events after fork`)
+
+    // Build branch info for the viewer
+    branchInfo = {
+      forkGoalId: firstGoal.id,
+      branchLabel: 'what-if: session tokens',
+      diffs: diff.objects.map((d) => ({
+        objectId: d.objectId,
+        type: d.type,
+        status: d.status,
+        data: (d.data ?? d.targetData ?? d.sourceData) as Record<string, unknown> | undefined,
+        sourceData: d.sourceData as Record<string, unknown> | undefined,
+        targetData: d.targetData as Record<string, unknown> | undefined,
+      })),
+      sourceEventsAfterFork: diff.sourceLog.length,
+      branchEventsAfterFork: diff.targetLog.length,
+    }
+  } else {
+    console.log('  (Skipped — need ≥2 goals to demonstrate branching)')
+  }
+
+  // ── Step 8: Open Visual Timeline ──────────────────────────────────
+
+  console.log('\n── Step 7: view() — Open Timeline Viewer ──────────')
 
   const renderableObjects: RenderableObject[] = objects.map((o) => ({
     id: o.id,
@@ -269,6 +340,7 @@ async function main() {
 
   const html = renderHtmlGraph(renderableObjects, renderableRelations, {
     title: `Coding Session: ${log.sessionId.slice(0, 12)}`,
+    branch: branchInfo,
   })
 
   const outputPath = join(tmpdir(), 'operad-coding-session-demo.html')
@@ -291,7 +363,11 @@ async function main() {
   console.log('  3. trace()   — every mutation with timestamp + actor')
   console.log('  4. blame()   — cost attribution per goal')
   console.log('  5. stash()   — detect wasted work (redundant reads)')
-  console.log('  6. view()    — interactive timeline + tree viewer')
+  console.log('  6. branch()  — fork at any goal, do alternate work')
+  console.log('  7. diff()    — compare branches (like git diff)')
+  console.log('  8. view()    — interactive timeline + diff viewer')
+  console.log('')
+  console.log('  In the viewer: click ⑂ on goal #1 to see the diff panel.')
   console.log('')
   console.log('  Try your own session:')
   console.log('  pnpm demo:coding ~/.claude/projects/<project>/<session>.jsonl\n')
