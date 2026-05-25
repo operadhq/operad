@@ -701,7 +701,7 @@ async function cmdView(positional: string[], flags: Record<string, string | bool
   const renderableObjects: RenderableObject[] = objects.map((o) => ({
     id: o.id,
     type: o.type,
-    data: o.data as Record<string, unknown>,
+    data: { ...o.data, _createdAt: o.createdAt } as Record<string, unknown>,
   }))
 
   const renderableRelations: RenderableRelation[] = relations.map((r) => ({

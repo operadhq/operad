@@ -87,6 +87,18 @@ export function renderHtmlGraph(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function formatTimestamp(iso: string | undefined): string {
+  if (!iso) return ''
+  try {
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    const h = d.getHours().toString().padStart(2, '0')
+    const m = d.getMinutes().toString().padStart(2, '0')
+    const s = d.getSeconds().toString().padStart(2, '0')
+    return `${h}:${m}:${s}`
+  } catch { return '' }
+}
+
 function buildNodeLabel(obj: RenderableObject): string {
   switch (obj.type) {
     case 'goal': {
@@ -127,7 +139,9 @@ function buildHtml(
     const text = buildNodeLabel(g)
     const childCount = goalChildren[g.id]?.length ?? 0
     const countBadge = childCount > 0 ? `<span class="child-count">${childCount}</span>` : ''
-    return `<div class="goal-item" data-id="${escapeHtml(g.id)}" data-index="${i}"><span class="goal-num">#${i + 1}</span><span class="goal-icon">★</span><span class="goal-text">${escapeHtml(text)}</span>${countBadge}</div>`
+    const ts = formatTimestamp(g.data._createdAt as string | undefined)
+    const timeBadge = ts ? `<span class="goal-time">${escapeHtml(ts)}</span>` : ''
+    return `<div class="goal-item" data-id="${escapeHtml(g.id)}" data-index="${i}"><span class="goal-num">#${i + 1}</span><span class="goal-icon">★</span><span class="goal-mid"><span class="goal-text">${escapeHtml(text)}</span>${timeBadge}</span>${countBadge}</div>`
   }).join('\n      ')
 
   return `<!DOCTYPE html>
@@ -191,7 +205,9 @@ function buildHtml(
   }
   .goal-num { color: #555; font-size: 11px; min-width: 24px; font-variant-numeric: tabular-nums; }
   .goal-icon { color: #2B5CE6; flex-shrink: 0; }
-  .goal-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; }
+  .goal-mid { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+  .goal-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; }
+  .goal-time { font-size: 10px; color: #555; font-family: 'SF Mono', Monaco, monospace; font-variant-numeric: tabular-nums; }
   .child-count {
     background: #2a2a4a; color: #888; font-size: 11px;
     padding: 1px 6px; border-radius: 10px; flex-shrink: 0;

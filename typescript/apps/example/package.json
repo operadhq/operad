@@ -9,11 +9,13 @@
     "demo:onboarding": "tsx src/agent-onboarding.ts",
     "demo:carrier": "tsx src/carrier-routing.ts",
     "demo:appetite": "tsx src/carrier-appetite.ts",
-    "demo:primitives": "tsx src/primitives-demo.ts"
+    "demo:primitives": "tsx src/primitives-demo.ts",
+    "demo:session": "tsx src/call-session-demo.ts"
   },
   "dependencies": {
     "@operad/core": "workspace:*",
-    "@operad/adapter-memory": "workspace:*"
+    "@operad/adapter-memory": "workspace:*",
+    "@operad/session": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.19.0"

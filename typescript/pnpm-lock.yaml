@@ -32,6 +32,9 @@ importers:
       '@operad/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@operad/session':
+        specifier: workspace:*
+        version: link:../../packages/session
     devDependencies:
       tsx:
         specifier: ^4.19.0

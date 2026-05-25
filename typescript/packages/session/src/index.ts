@@ -20,6 +20,9 @@ export { commit, type CommitOptions } from './session.js'
 export { createRuntime } from '@operad/core'
 export { MemoryAdapter } from '@operad/adapter-memory'
 
+// Visualization
+export { renderHtmlGraph, type RenderHtmlOptions } from './render-html.js'
+
 // Subsystems (for advanced usage)
 export { parseAndEmit, type ParseStats } from './parser.js'
 export { computeMessageCost, aggregateBlame } from './cost.js'
