@@ -29,8 +29,6 @@ Each opens an interactive timeline viewer with three modes:
 - **Causal Chain** — tree view showing event causality (like `git log --graph`)
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
 
-> **Cloud viewer coming soon** — share sessions via URL. [**Get notified →**](https://operad.sh/#notify)
-
 ```
 session_a3f7c2d1 — 142 events (309 total)
 

@@ -23,9 +23,6 @@ npx @operad/session demo research-agent --html      # Literature survey, benchma
 npx @operad/session demo primitives --html          # All 7 runtime primitives
 ```
 
-> **Cloud viewer coming soon** — share agent sessions with your team via URL.
-> [**Get notified →**](https://operad.sh/#notify)
-
 ---
 
 ## Quick Start
@@ -381,9 +378,6 @@ Each opens an interactive HTML viewer with three timeline modes:
 - **Swim Lanes** — events by actor with causal arrows crossing lanes
 - **Causal Chain** — tree view (like `git log --graph` for agent cognition)
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
-
-> **Want to share sessions with your team?** The cloud viewer is coming.
-> [**Sign up for early access →**](https://operad.sh/#notify)
 
 ### Runtime demos
 
