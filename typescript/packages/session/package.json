@@ -27,8 +27,9 @@
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist",
+    "demo": "node bin/demo.mjs primitives",
     "prepublishOnly": "pnpm run build",
-    "postinstall": "echo '\n  📊 @operad/session installed.\n     Run \"operad-session init\" to enable auto-tracking for Claude Code.\n'"
+    "postinstall": "node dist/postinstall.js || echo '  📊 @operad/session installed. Run operad-session init to enable tracking.'"
   },
   "publishConfig": {
     "access": "public"
@@ -40,6 +41,8 @@
     "jsonl",
     "event-sourcing",
     "claude-code",
+    "codex-cli",
+    "opencode",
     "cost-tracking",
     "hooks"
   ],

@@ -1,35 +1,129 @@
 # @operad/session
 
-Git for AI agent sessions. Import, analyze, branch, and compare agent work.
-
-<!-- TODO: Add terminal recording GIF here showing fork --run workflow -->
-<!-- asciinema rec demo.cast && svg-term --in demo.cast --out demo.svg -->
-
-## Try It (2 minutes)
+See what your AI coding agent actually did.
 
 ```bash
-npm install @operad/core @operad/adapter-memory
-npx tsx examples/quickstart.ts
+npm install @operad/session
 ```
 
-Creates a graph, records a decision, forks at that decision, runs an alternative, and diffs the two. See [examples/quickstart.ts](./examples/quickstart.ts).
-
-## Quick Start
+Hooks auto-configure for Claude Code, Codex, and OpenCode. Start coding — after your session:
 
 ```bash
-# Import a Claude Code session
-operad-session commit ~/.claude/projects/myapp/session.jsonl
+operad-session log --graph <session-id>
+```
 
-# See what happened
-operad-session inspect --graph session_1716000000000
+### Try the interactive demo
 
-# Fork at a decision point and try something different
-operad-session fork --graph session_1716000000000 \
-  --at-event evt_17160000 \
+```bash
+operad-session demo primitives
+```
+
+Walks you through all 7 primitives step-by-step: actor provenance, relation behaviors, scoped views, LLM integration, governance patches, forking, and pattern matching.
+
+```
+session_a3f7c2d1 — 142 events (309 total)
+
+  [goal.set]              user     "Fix the authentication bug in login flow"
+  [tool_called]           agent    Read → src/auth/login.ts
+  [tool_called]           agent    Read → src/auth/middleware.ts
+  [tool_called]           agent    Grep → src/auth/
+  [tool_called]           agent    Read → src/auth/login.ts        ← redundant
+  [tool_called]           agent    Edit → src/auth/login.ts
+  [tool_called]           agent    Bash
+  [goal.set]              user     "Now refactor auth to use JWT instead of sessions"
+  [tool_called]           agent    Read → src/auth/config.ts
+  [tool_called]           agent    Write → src/auth/jwt.ts
+  [tool_called]           agent    Edit → src/auth/middleware.ts
+  [tool_called]           agent    Edit → src/auth/login.ts
+  [decision.recorded]     agent    selected: jwt_tokens
+  [tool_called]           agent    Bash
+  ...
+
+Total: 309 events
+```
+
+Every file read, every edit, every decision — with the full trace of how your agent got there.
+
+```bash
+operad-session graph --graph <session-id>
+```
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  OPERAD EVENT GRAPH — session_a3f7c2d1                             ║
+║  309 events │ 4 goals │ 87 tools │ $12.40 cost                    ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+  ★ Goal #1: Fix the authentication bug in login flow
+  │
+  ├── ⚙ Tools: Read×5, Edit×1, Grep×2, Bash×1
+  ├── Events: 24
+  │
+  ★ Goal #2: Now refactor auth to use JWT instead of sessions
+  │
+  ├── ⚙ Tools: Read×12, Edit×6, Write×2, Bash×4
+  ├── $ Cost: $8.20
+  ├── Events: 63
+  │
+  ★ Goal #3: Add tests for the new JWT auth
+  │
+  ├── ⚙ Tools: Read×8, Write×4, Bash×6
+  ├── Events: 41
+  │
+  ╰── ◉ Graph complete: 309 events
+
+  Tool Distribution:
+  ┌────────────────────────────────────────────────┐
+  │ Read        ████████████████████████████    34 │
+  │ Edit        ████████████████               18 │
+  │ Bash        ██████████████                 16 │
+  │ Write       ████████                        9 │
+  │ Grep        ██████                          7 │
+  │ Glob        ███                             3 │
+  └────────────────────────────────────────────────┘
+```
+
+## Install
+
+```bash
+npm install @operad/session
+```
+
+On install, hooks are automatically configured for **every local coding agent**:
+
+```
+📊 @operad/session — tracking enabled for all local agents:
+   ✓ Claude Code    (.claude/settings.json)
+   ✓ Codex CLI      (.codex/hooks.json)
+   ✓ OpenCode       (.opencode/plugins/operad-hooks.ts)
+```
+
+No config. No init command. Just install and code.
+
+## What You Can Do With the Log
+
+```bash
+# The event trace — what happened, in order
+operad-session log --graph <session-id>
+
+# Structured view — goals, tools, cost per goal
+operad-session graph --graph <session-id>
+
+# Cost per goal — where the money went
+operad-session blame --graph <session-id>
+
+# Wasted work — redundant reads, re-spent tokens
+operad-session stash --graph <session-id>
+
+# Interactive timeline in browser
+operad-session view --graph <session-id>
+
+# Fork at a decision and try something different
+operad-session fork --graph <session-id> --at-event <event-id> \
   --run "Use session cookies instead of JWT"
 
-# Compare outcomes
-operad-session diff session_1716000000000 session_1716000000000_fork
+# Compare the two approaches
+operad-session diff <session-id> <session-id>_fork
 ```
 
 ## Commands
@@ -143,10 +237,14 @@ The event log is the agent. The graph is its world. See [docs/PHILOSOPHY.md](../
 
 All data persists to `~/.operad/session.db` (SQLite). No server required.
 
-## Supported Harnesses
+## Supported Agents
 
-- Claude Code (auto-detected)
-- OpenAI Codex
-- OpenCode
+All configured automatically on install — no setup needed.
 
-The parser auto-detects which harness produced the JSONL.
+| Agent | Hook Config | Session Format |
+|-------|------------|----------------|
+| **Claude Code** | `.claude/settings.json` | JSONL (auto-detected) |
+| **Codex CLI** | `.codex/hooks.json` | JSONL (auto-detected) |
+| **OpenCode** | `.opencode/plugins/operad-hooks.ts` | JSONL (auto-detected) |
+
+To reconfigure or add hooks manually: `operad-session init` or `operad-session init --harness codex`

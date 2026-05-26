@@ -1560,6 +1560,67 @@ function detectRedundantReads(events: GraphEvent[]): Set<number> {
   return redundantIndices
 }
 
+// ─── Demo ───────────────────────────────────────────────────────────────────
+
+async function cmdDemo(positional: string[], flags: Record<string, string | boolean>) {
+  const { DEMOS } = await import('./demos/index.js')
+  const names = Object.keys(DEMOS) as Array<keyof typeof DEMOS>
+
+  // --list or no args → show available demos
+  if (flags['list'] || positional.length === 0) {
+    console.log(`\n${c.bold}Available demos:${c.reset}\n`)
+    for (const name of names) {
+      console.log(`  ${c.green}${name}${c.reset}  ${DEMOS[name].description}`)
+    }
+    console.log(`\n${c.dim}Run: operad-session demo <name>${c.reset}\n`)
+    return
+  }
+
+  const name = positional[0]
+  if (!(name in DEMOS)) {
+    console.error(`${c.red}Error:${c.reset} Unknown demo "${name}". Available: ${names.join(', ')}`)
+    process.exit(1)
+  }
+
+  // --html implies --no-pause (skip Enter prompts before opening browser)
+  const wantHtml = flags['html'] === true
+  const interactive = wantHtml ? false : !flags['no-pause']
+
+  const result = await DEMOS[name as keyof typeof DEMOS].run({ interactive })
+
+  // ── --html: render interactive replay and open in browser ──────────
+  if (wantHtml) {
+    const events = await result.storage.queryEvents(result.graphId, {})
+    const objects = await result.storage.queryObjects(result.graphId, {})
+    const relations = await result.storage.queryRelations(result.graphId, {})
+
+    const html = renderSessionHtml(events, {
+      title: `Demo: ${name}`,
+      objects,
+      relations,
+    })
+
+    const outputPath = (flags['output'] as string)
+      ? resolve(flags['output'] as string)
+      : join(tmpdir(), `operad-demo-${name}.html`)
+
+    writeFileSync(outputPath, html, 'utf-8')
+    const goalCount = events.filter(e => e.type === 'goal.set').length
+    console.log(`${c.green}Wrote${c.reset} ${outputPath}`)
+    console.log(`${c.dim}${events.length} events${goalCount > 0 ? `, ${goalCount} goals` : ''}${c.reset}`)
+
+    if (!flags['no-open']) {
+      try {
+        const cmd = platform() === 'darwin' ? 'open' : 'xdg-open'
+        execSync(`${cmd} "${outputPath}"`, { stdio: 'ignore' })
+        console.log(`${c.cyan}Opened${c.reset} in default browser`)
+      } catch {
+        console.log(`${c.yellow}Could not auto-open.${c.reset} Open manually: ${outputPath}`)
+      }
+    }
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const HELP = `
@@ -1589,6 +1650,10 @@ ${c.bold}COMMANDS${c.reset}
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
   ${c.green}view${c.reset} --graph <id>            Open tabbed session viewer in browser (--classic for old tree view)
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
+  ${c.green}demo${c.reset} [<name>]                 Run a built-in demo (--list to see all)
+        [--html]                     Open interactive replay in browser after demo
+        [--output <path>]            Write HTML to specific path (with --html)
+        [--no-open]                  Write HTML but don't auto-open browser
 
 ${c.bold}GLOBAL OPTIONS${c.reset}
   --json          Machine-readable JSON output
@@ -1642,6 +1707,12 @@ ${c.bold}EXAMPLES${c.reset}
 
   ${c.dim}# Explore 3 branches from a point${c.reset}
   operad-session explore evt_17160000 -n 3 --graph session_1716000000000
+
+  ${c.dim}# Run the primitives demo${c.reset}
+  operad-session demo primitives
+
+  ${c.dim}# Run demo and open interactive replay in browser${c.reset}
+  operad-session demo primitives --html
 `
 
 async function main() {
@@ -1703,6 +1774,9 @@ async function main() {
       break
     case 'view':
       await cmdView(positional, flags)
+      break
+    case 'demo':
+      await cmdDemo(positional, flags)
       break
     default:
       // Backward compat: if it looks like a file path, treat as commit
