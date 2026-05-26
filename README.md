@@ -10,7 +10,15 @@ Every mutation is an event. Every event has a cause. Every decision is recorded.
 npx @operad/session demo coding --html
 ```
 
-Opens an interactive timeline viewer in your browser — swim lanes, causal chains, and waterfall phases for a coding agent session.
+![CLI output](docs/images/demo-cli.png)
+
+Add `--html` to open the interactive timeline viewer in your browser:
+
+![Waterfall — phase gantt per goal](docs/images/demo-waterfall.png)
+
+![Swim Lanes — events by actor with causal arrows](docs/images/demo-swim-lanes.png)
+
+![Event Stream — chronological event log](docs/images/demo-event-stream.png)
 
 **More demos:**
 

@@ -25,6 +25,13 @@ operad-session demo primitives --html          # All 7 runtime primitives
 ```
 
 Each opens an interactive timeline viewer with three modes:
+
+![Waterfall — phase gantt per goal](../../../docs/images/demo-waterfall.png)
+
+![Event Stream — chronological event log](../../../docs/images/demo-event-stream.png)
+
+![Swim Lanes — events by actor with causal arrows](../../../docs/images/demo-swim-lanes.png)
+
 - **Swim Lanes** — events by actor (user / agent / thinking) with causal arrows
 - **Causal Chain** — tree view showing event causality (like `git log --graph`)
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
