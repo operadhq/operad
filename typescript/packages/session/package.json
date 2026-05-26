@@ -1,0 +1,66 @@
+{
+  "name": "@operad/session",
+  "version": "0.1.0",
+  "description": "JSONL → Graph importer. Commit agent sessions into Operad's event log for replay, diff, and blame.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "operad-session": "./dist/cli.js",
+    "operad-hook": "./dist/hook.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./query": {
+      "types": "./dist/query.d.ts",
+      "import": "./dist/query.js",
+      "require": "./dist/query.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "operad",
+    "ai-agents",
+    "session-replay",
+    "jsonl",
+    "event-sourcing",
+    "claude-code",
+    "cost-tracking",
+    "hooks"
+  ],
+  "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/operadhq/operad",
+    "directory": "typescript/packages/session"
+  },
+  "homepage": "https://operad.dev",
+  "bugs": "https://github.com/operadhq/operad/issues",
+  "dependencies": {
+    "@operad/core": "workspace:*",
+    "@operad/adapter-memory": "workspace:*",
+    "@operad/adapter-sqlite": "workspace:*"
+  },
+  "devDependencies": {
+    "@operad/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "tsup": "^8.3.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT"
+}

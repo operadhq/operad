@@ -24,6 +24,7 @@
  */
 
 import type { StorageAdapter, Runtime, JsonValue } from '@operad/core'
+import { renderAsciiGraph } from '@operad/core'
 
 // ─── Arg Parsing ────────────────────────────────────────────────────────────
 
@@ -206,6 +207,159 @@ async function cmdDemo(name: string | undefined) {
   }
 }
 
+async function cmdInit(name: string | undefined) {
+  const { mkdirSync, writeFileSync, existsSync } = await import('node:fs')
+  const { resolve } = await import('node:path')
+
+  const projectName = name ?? 'my-operad-agent'
+  const dir = resolve(process.cwd(), projectName)
+
+  if (existsSync(dir)) {
+    console.error(`ERROR: Directory "${projectName}" already exists.`)
+    process.exit(1)
+  }
+
+  mkdirSync(resolve(dir, 'src'), { recursive: true })
+
+  // package.json
+  writeFileSync(
+    resolve(dir, 'package.json'),
+    JSON.stringify(
+      {
+        name: projectName,
+        version: '0.1.0',
+        private: true,
+        type: 'module',
+        scripts: {
+          start: 'tsx src/agent.ts',
+          build: 'tsc',
+        },
+        dependencies: {
+          '@operad/core': '^0.1.0',
+          '@operad/adapter-memory': '^0.1.0',
+        },
+        devDependencies: {
+          tsx: '^4.19.0',
+          typescript: '^5.7.0',
+        },
+      },
+      null,
+      2
+    ) + '\n'
+  )
+
+  // tsconfig.json
+  writeFileSync(
+    resolve(dir, 'tsconfig.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2022',
+          module: 'Node16',
+          moduleResolution: 'Node16',
+          strict: true,
+          esModuleInterop: true,
+          outDir: 'dist',
+          rootDir: 'src',
+          declaration: true,
+        },
+        include: ['src'],
+      },
+      null,
+      2
+    ) + '\n'
+  )
+
+  // src/agent.ts — starter agent based on the insurance demo
+  writeFileSync(
+    resolve(dir, 'src/agent.ts'),
+    `/**
+ * My Operad Agent — Starter Template
+ *
+ * This agent demonstrates the core Operad primitives:
+ *   - Graph: Objects (nodes) + Relations (edges)
+ *   - Event Log: Every mutation is an immutable event
+ *   - Behaviors: Reactive handlers that fire on events
+ *   - Decisions: Record choices with alternatives + confidence
+ *
+ * Run: npx tsx src/agent.ts
+ */
+
+import { createRuntime, behavior } from '@operad/core'
+import type { GraphEvent, GraphAPI } from '@operad/core'
+import { MemoryAdapter } from '@operad/adapter-memory'
+
+// ─── Define Behaviors ───────────────────────────────────────────────────────
+// Behaviors are reactive subscriptions — they fire when matching events occur.
+
+const logActivity = behavior({
+  name: 'log-activity',
+  on: ['object.created', 'relation.created'],
+  handler: async (event: GraphEvent, graph: GraphAPI) => {
+    console.log(\`  [behavior] \${event.type}: \${JSON.stringify(event.payload)}\`)
+  },
+})
+
+// TODO(human): Add a custom behavior here
+// Define a behavior that reacts to 'object.patched' events.
+// Consider: What should happen when an object is updated?
+// Maybe validate data, trigger a downstream action, or record a decision.
+
+// ─── Main ───────────────────────────────────────────────────────────────────
+
+async function main() {
+  const runtime = createRuntime({
+    storage: new MemoryAdapter(),
+    behaviors: [logActivity],
+  })
+
+  console.log('\\n◆ My Operad Agent\\n')
+
+  // Create a graph — all objects, relations, and events live here
+  const graph = await runtime.createGraph('my-agent')
+  console.log('  ✓ Graph created: my-agent')
+
+  // Add objects (nodes)
+  const user = await graph.addObject({
+    type: 'user',
+    data: { name: 'Alice', role: 'admin' },
+  })
+  console.log(\`  + User: \${user.data.name}\`)
+
+  const task = await graph.addObject({
+    type: 'task',
+    data: { title: 'Review report', status: 'open', priority: 'high' },
+  })
+  console.log(\`  + Task: \${task.data.title}\`)
+
+  // Add a relation (edge)
+  await graph.addRelation(user.id, task.id, 'assigned_to')
+  console.log(\`  + Relation: \${user.data.name} → assigned_to → \${task.data.title}\`)
+
+  // Patch an object — triggers behaviors
+  console.log('\\n  → Updating task status...')
+  await graph.patchObject(task.id, { status: 'in_progress' })
+
+  // Record a decision — captures reasoning for audit
+  const runtime2 = createRuntime({ storage: new MemoryAdapter() })
+  console.log('\\n  ✓ Agent complete. Every action is event-sourced.')
+  console.log('    Run \`operad graph inspect my-agent\` to see the full graph.\\n')
+}
+
+main().catch(console.error)
+`
+  )
+
+  console.log()
+  console.log(`  ◆ Project created: ${projectName}/`)
+  console.log()
+  console.log('  Next steps:')
+  console.log(`    cd ${projectName}`)
+  console.log('    npm install')
+  console.log('    npx tsx src/agent.ts')
+  console.log()
+}
+
 async function cmdGraphCreate(id: string, runtime: Runtime) {
   await runtime.createGraph(id)
   console.log(`◆ Graph created: ${id}`)
@@ -227,7 +381,9 @@ async function cmdGraphInspect(id: string, runtime: Runtime, storage: StorageAda
   // ── ASCII graph visualization ──
   if (objects.length > 0) {
     console.log('Graph:')
-    renderAsciiGraph(objects, relations)
+    for (const line of renderAsciiGraph(objects, relations)) {
+      console.log(line)
+    }
     console.log()
   }
 
@@ -284,147 +440,7 @@ async function cmdGraphInspect(id: string, runtime: Runtime, storage: StorageAda
   console.log()
 }
 
-/**
- * Renders a visual ASCII graph with box-drawn node cards and edge trees.
- *
- * Full IDs and full data are shown — no truncation. Box width adapts to content.
- * Outgoing edges shown as ├──▶ tree, incoming edges as ├──◀.
- * Topologically ordered via BFS. Isolated nodes marked with ○.
- */
-function renderAsciiGraph(
-  objects: Array<{ id: string; type: string; data: Record<string, unknown> }>,
-  relations: Array<{ sourceId: string; targetId: string; type: string }>,
-): void {
-  // Lookups
-  const objById = new Map(objects.map((o) => [o.id, o]))
-  const connected = new Set<string>()
-
-  // Group edges
-  const outgoing = new Map<string, Array<{ targetId: string; type: string }>>()
-  const incoming = new Map<string, Array<{ sourceId: string; type: string }>>()
-
-  for (const rel of relations) {
-    connected.add(rel.sourceId)
-    connected.add(rel.targetId)
-    if (!outgoing.has(rel.sourceId)) outgoing.set(rel.sourceId, [])
-    outgoing.get(rel.sourceId)!.push({ targetId: rel.targetId, type: rel.type })
-    if (!incoming.has(rel.targetId)) incoming.set(rel.targetId, [])
-    incoming.get(rel.targetId)!.push({ sourceId: rel.sourceId, type: rel.type })
-  }
-
-  // Edge label builders — full IDs, no truncation
-  const edgeLabel = (type: string, targetId: string): string => {
-    const target = objById.get(targetId)
-    const tLabel = target ? `${target.type}:${targetId}` : targetId
-    return `${type} ── ${tLabel}`
-  }
-
-  const inEdgeLabel = (type: string, sourceId: string): string => {
-    const source = objById.get(sourceId)
-    const sLabel = source ? `${source.type}:${sourceId}` : sourceId
-    return `${sLabel} ── ${type}`
-  }
-
-  // Format data as multi-line key: value pairs
-  const dataLines = (data: Record<string, unknown>): string[] => {
-    const entries = Object.entries(data)
-    if (entries.length === 0) return ['(empty)']
-    return entries.map(([k, v]) => {
-      const val = typeof v === 'string' ? `"${v}"` : JSON.stringify(v)
-      return `${k}: ${val}`
-    })
-  }
-
-  // Topological order via BFS
-  const printed = new Set<string>()
-  const order: string[] = []
-  const roots = objects.filter((o) => outgoing.has(o.id) && !incoming.has(o.id))
-  if (roots.length === 0) {
-    for (const o of objects) {
-      if (outgoing.has(o.id)) roots.push(o)
-    }
-  }
-  const queue = [...roots]
-  while (queue.length > 0) {
-    const node = queue.shift()!
-    if (printed.has(node.id)) continue
-    printed.add(node.id)
-    order.push(node.id)
-    for (const e of outgoing.get(node.id) ?? []) {
-      if (!printed.has(e.targetId)) queue.push(objById.get(e.targetId)!)
-    }
-  }
-  for (const o of objects) {
-    if (!printed.has(o.id)) order.push(o.id)
-  }
-
-  // Render each node with dynamic-width box
-  const pad = (s: string, w: number) => s.length >= w ? s : s + ' '.repeat(w - s.length)
-  let isFirst = true
-
-  for (const id of order) {
-    const obj = objById.get(id)!
-    const isIsolated = !connected.has(id)
-    const out = outgoing.get(id) ?? []
-    const inc = incoming.get(id) ?? []
-    const icon = isIsolated ? '○' : '●'
-
-    // Collect all content lines to measure max width
-    const idStr = isIsolated ? `${obj.id}  (isolated)` : obj.id
-    const dLines = dataLines(obj.data)
-    const outLabels = out.map((e) => `├──▶ ${edgeLabel(e.type, e.targetId)}`)
-    if (outLabels.length > 0) outLabels[outLabels.length - 1] = '└' + outLabels[outLabels.length - 1].slice(1)
-    const incLabels = (inc.length > 0 && !outgoing.has(id))
-      ? inc.map((e) => `├──◀ ${inEdgeLabel(e.type, e.sourceId)}`)
-      : []
-    if (incLabels.length > 0) incLabels[incLabels.length - 1] = '└' + incLabels[incLabels.length - 1].slice(1)
-
-    const allLines = [idStr, ...dLines, ...outLabels, ...incLabels]
-    const maxContent = Math.max(...allLines.map((l) => l.length))
-    const innerW = Math.max(maxContent, 20) // minimum width
-    const boxW = innerW + 4 // "│  " + content + " │"
-
-    // Connector between cards
-    if (!isFirst && !isIsolated && inc.length > 0) {
-      console.log('       │')
-      console.log('       ▼')
-    }
-    if (!isFirst && isIsolated) console.log()
-    isFirst = false
-
-    // Top border
-    const typeHeader = ` ${icon} ${obj.type} `
-    const topFill = '─'.repeat(Math.max(0, boxW - 3 - typeHeader.length))
-    console.log(`  ╭─${typeHeader}${topFill}╮`)
-
-    // ID
-    console.log(`  │  ${pad(idStr, innerW)} │`)
-
-    // Data — each key on its own line
-    for (const line of dLines) {
-      console.log(`  │  ${pad(line, innerW)} │`)
-    }
-
-    // Outgoing edges
-    if (outLabels.length > 0) {
-      console.log(`  ├${'─'.repeat(boxW - 2)}┤`)
-      for (const line of outLabels) {
-        console.log(`  │  ${pad(line, innerW)} │`)
-      }
-    }
-
-    // Incoming edges (leaf nodes only)
-    if (incLabels.length > 0) {
-      console.log(`  ├${'─'.repeat(boxW - 2)}┤`)
-      for (const line of incLabels) {
-        console.log(`  │  ${pad(line, innerW)} │`)
-      }
-    }
-
-    // Bottom border
-    console.log(`  ╰${'─'.repeat(boxW - 2)}╯`)
-  }
-}
+// renderAsciiGraph is imported from @operad/core
 
 async function cmdGraphEvents(
   id: string,
@@ -621,6 +637,7 @@ function printHelp() {
   ◆ operad — unified CLI for the Operad event-sourced graph runtime
 
   Dev Commands:
+    operad init [name]                  Scaffold a new Operad project
     operad demo [name]                  Run a built-in demo (primitives, insurance, fraud)
     operad graph create <id>            Create a new graph
     operad graph inspect <id>           Show objects, relations, events summary
@@ -658,6 +675,11 @@ async function main() {
   // Commands that don't need runtime
   if (cmd === 'serve') {
     await cmdServe(flags)
+    return
+  }
+
+  if (cmd === 'init') {
+    await cmdInit(positional[1])
     return
   }
 

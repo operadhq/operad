@@ -359,9 +359,72 @@ export interface Runtime {
   diff(sourceGraphId: string, targetGraphId: string): Promise<GraphDiff>
   /** Replay the log up to eventId, returning the graph state at that point */
   checkout(graphId: string, eventId: string): Promise<GraphAPI>
+  /**
+   * Revert graph to a previous event, generating compensating events.
+   * Like `git revert` — doesn't erase history, adds new events that undo the effect.
+   * Optionally calls reversal handlers for side-effecting tools.
+   */
+  revert(graphId: string, opts: RevertOptions): Promise<RevertResult>
+  /**
+   * Explore multiple branches in parallel, pick a winner.
+   * Like `git worktree` + parallel agents — fork N branches,
+   * run a scorer on each, merge the best one back.
+   */
+  explore(graphId: string, opts: ExploreOptions): Promise<ExploreResult>
   approve(patchId: string, decidedBy: string): Promise<void>
   deny(patchId: string, decidedBy: string): Promise<void>
   pendingPatches(graphId: string): PatchProposal[]
+  /** Register a handler that can reverse a specific event type's side effects */
+  registerReversal(eventType: string, handler: ReversalHandler): void
+}
+
+// ─── Revert (git revert for agent actions) ──────────────────────────────────
+
+export interface RevertOptions {
+  /** Revert all events after this event (exclusive — this event is kept) */
+  toEvent: string
+  /** If true, call registered reversal handlers for side-effecting events */
+  reverseEffects?: boolean
+  /** Who is performing the revert */
+  actor?: string
+}
+
+export interface RevertResult {
+  /** Number of events that were compensated */
+  eventsReverted: number
+  /** Compensating events emitted */
+  compensatingEvents: GraphEvent[]
+  /** Side effects that couldn't be reversed (no handler registered) */
+  unreversible: GraphEvent[]
+}
+
+/** Handler that reverses a tool's side effects (e.g., undo a file edit) */
+export type ReversalHandler = (event: GraphEvent) => Promise<void>
+
+// ─── Explore (parallel branch exploration) ──────────────────────────────────
+
+export interface ExploreOptions {
+  /** Fork point — all branches start from this event */
+  atEvent: string
+  /** Number of branches to explore */
+  branches: number
+  /** Function that runs on each branch and produces a result */
+  worker: (graph: GraphAPI, branchId: string) => Promise<unknown>
+  /** Score each branch's result — highest score wins */
+  scorer: (result: unknown, branchId: string) => number
+  /** Label prefix for branches (default: 'explore') */
+  label?: string
+}
+
+export interface ExploreResult {
+  /** The winning branch ID */
+  winnerId: string
+  /** The winning branch's score */
+  winnerScore: number
+  /** All branch results with scores */
+  branches: Array<{ branchId: string; score: number; result: unknown }>
+  /** The winning graph (already created, ready to use) */
+  winnerGraph: GraphAPI
 }
 
 // ─── Storage Adapter ─────────────────────────────────────────────────────────

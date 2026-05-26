@@ -30,6 +30,9 @@
     "start": "node dist/cli.js",
     "clean": "rm -rf dist"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "operad",
     "ai-agents",
@@ -37,7 +40,9 @@
     "event-sourcing",
     "knowledge-graph",
     "docker",
-    "hono"
+    "hono",
+    "agent-memory",
+    "cli"
   ],
   "author": "Operad HQ <hello@operad.dev> (https://operad.dev)",
   "repository": {

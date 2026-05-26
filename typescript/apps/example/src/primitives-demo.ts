@@ -7,7 +7,7 @@
  * Run: pnpm demo:primitives
  */
 
-import { createRuntime, behavior, relationBehavior, llmBehavior } from '@operad/core'
+import { createRuntime, behavior, relationBehavior, llmBehavior, renderAsciiGraph } from '@operad/core'
 import type { Runtime, GraphAPI, LLMProvider } from '@operad/core'
 import { MemoryAdapter } from '@operad/adapter-memory'
 
@@ -260,6 +260,13 @@ async function main() {
   // Check for patch events
   const patchEvents = finalEvents.filter(e => e.type.startsWith('patch.'))
   console.log(`  Patch events: ${patchEvents.map(e => e.type).join(', ')}`)
+
+  // ── ASCII Graph Visualization ────────────────────────────────────────
+  console.log('\n── Graph Visualization ─────────────────────────')
+  console.log()
+  for (const line of renderAsciiGraph(finalObjects, finalRelations)) {
+    console.log(line)
+  }
 
   console.log('\n' + '─'.repeat(55))
   console.log('◆ All 7 primitives exercised. Every action is event-sourced.')
