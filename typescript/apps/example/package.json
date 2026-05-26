@@ -13,7 +13,8 @@
     "demo:session": "tsx src/call-session-demo.ts",
     "demo:coding": "tsx src/coding-session-demo.ts",
     "demo:fork": "tsx src/fork-diff-demo.ts",
-    "demo:quickstart": "tsx ../../packages/session/examples/quickstart.ts"
+    "demo:quickstart": "tsx ../../packages/session/examples/quickstart.ts",
+    "demo:transactional": "tsx src/transactional-demo.ts"
   },
   "dependencies": {
     "@operad/core": "workspace:*",
