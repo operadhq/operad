@@ -3,22 +3,32 @@
  * operad-session — Git-like CLI for agent session graphs.
  *
  * Subcommands:
- *   commit <path.jsonl>       Import JSONL into the persistent graph
- *   log [--graph <id>]        Show event history (like git log)
- *   blame [--graph <id>]      Show cost per goal
- *   diff <graph-a> <graph-b>  Compare two sessions
- *   stash [--graph <id>]      Show wasted work (redundant reads)
- *   revert <event-id>         Revert to a point (compensating events)
- *   explore <event-id> -n 3   Fork N branches from a point
+ *   commit <path.jsonl>         Import JSONL into the persistent graph
+ *   inspect [--event <id>]      Show run summary or single event detail
+ *   log [--graph <id>]          Show event history (like git log)
+ *   blame [--graph <id>]        Show cost per goal
+ *   diff <graph-a> <graph-b>    Compare two sessions
+ *   fork --at-event <evt>       Fork a session at an event
+ *   replay [--to-event <evt>]   Rebuild graph from events (time-travel)
+ *   export-trace [--format]     Export trace as JSONL or text
+ *   view [--graph <id>]         Open interactive timeline in browser
+ *   stash [--graph <id>]        Show wasted work (redundant reads)
+ *   revert <event-id>           Revert to a point (compensating events)
+ *   explore <event-id> -n 3     Fork N branches from a point
  */
-import { readFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir, platform } from 'node:os'
+import { execSync, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createRuntime } from '@operad/core'
 import type { GraphEvent, GraphDiff, RevertResult, ExploreResult } from '@operad/core'
 import { SqliteAdapter } from '@operad/adapter-sqlite'
 import { commit } from './session.js'
 import { detectStash } from './waste.js'
+import { renderHtmlGraph } from './render-html.js'
+import { extractForkContext } from './context.js'
+import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -173,41 +183,100 @@ async function cmdLog(positional: string[], flags: Record<string, string | boole
     return
   }
 
-  // Display like git log
-  console.log(`${c.bold}Event log for graph:${c.reset} ${c.yellow}${graphId}${c.reset}`)
-  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
-  console.log()
-
-  for (const event of events) {
-    const typeColor = event.type.startsWith('custom.goal') ? c.green
-      : event.type.startsWith('custom.tool') ? c.cyan
-      : event.type.startsWith('custom.revert') ? c.red
-      : c.magenta
-
-    const shortId = event.id.slice(0, 12)
-    const ts = formatTimestamp(event.timestamp)
-    const actor = event.actor ? ` ${c.dim}(${event.actor})${c.reset}` : ''
-
-    console.log(`${c.yellow}${shortId}${c.reset} ${typeColor}${event.type}${c.reset}${actor}`)
-    console.log(`${c.dim}  ${ts}${c.reset}`)
-
-    // Show payload highlights
-    if (event.payload.tool) {
-      console.log(`  tool: ${c.bold}${event.payload.tool}${c.reset}`)
-    }
-    if (event.payload.goal) {
-      console.log(`  goal: ${c.green}${event.payload.goal}${c.reset}`)
-    }
-    if (event.payload.file_path) {
-      console.log(`  file: ${event.payload.file_path}`)
-    }
-    if (event.causedBy) {
-      console.log(`  ${c.dim}caused by: ${event.causedBy.slice(0, 12)}${c.reset}`)
-    }
+  // Verbose mode (--verbose): git-log style with full detail
+  if (flags['verbose']) {
+    console.log(`${c.bold}Event log for graph:${c.reset} ${c.yellow}${graphId}${c.reset}`)
+    console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
     console.log()
+
+    for (const event of events) {
+      const typeColor = event.type.startsWith('custom.goal') ? c.green
+        : event.type.startsWith('custom.tool') ? c.cyan
+        : event.type.startsWith('custom.revert') ? c.red
+        : c.magenta
+
+      const shortId = event.id.slice(0, 12)
+      const ts = formatTimestamp(event.timestamp)
+      const actor = event.actor ? ` ${c.dim}(${event.actor})${c.reset}` : ''
+
+      console.log(`${c.yellow}${shortId}${c.reset} ${typeColor}${event.type}${c.reset}${actor}`)
+      console.log(`${c.dim}  ${ts}${c.reset}`)
+
+      if (event.payload.tool) {
+        console.log(`  tool: ${c.bold}${event.payload.tool}${c.reset}`)
+      }
+      if (event.payload.goal) {
+        console.log(`  goal: ${c.green}${event.payload.goal}${c.reset}`)
+      }
+      if (event.payload.file_path) {
+        console.log(`  file: ${event.payload.file_path}`)
+      }
+      if (event.causedBy) {
+        console.log(`  ${c.dim}caused by: ${event.causedBy.slice(0, 12)}${c.reset}`)
+      }
+      console.log()
+    }
+
+    console.log(`${c.dim}Total: ${events.length} events${c.reset}`)
+    return
   }
 
+  // Default: compact streaming-style trace (like ActiveGraph)
+  // Filter out internal bookkeeping events that are noise in the trace
+  const internalTypes = new Set([
+    'custom.blame_recorded',
+    'custom.assistant_responded',
+    'custom.reasoning_trace',
+  ])
+  const traceEvents = events.filter((e) => !internalTypes.has(e.type))
+
+  console.log(`${c.bold}${c.yellow}${graphId}${c.reset} ${c.dim}— ${traceEvents.length} events (${events.length} total)${c.reset}`)
+  console.log()
+
+  for (const event of traceEvents) {
+    // Format the event type — strip 'custom.' prefix for readability
+    const rawType = event.type.replace(/^custom\./, '')
+
+    // Color by category
+    const typeColor = rawType === 'goal.set' || rawType === 'goal_started' ? c.green
+      : rawType === 'tool_called' ? c.cyan
+      : rawType === 'blame_recorded' ? c.yellow
+      : rawType.startsWith('object.') || rawType.startsWith('relation.') ? c.magenta
+      : rawType === 'reasoning_trace' || rawType === 'assistant_responded' ? c.blue
+      : rawType.startsWith('revert') ? c.red
+      : c.dim
+
+    // Build the detail string
+    let detail = ''
+    const p = event.payload
+
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      const text = (p.text as string) ?? (p.goal as string) ?? ''
+      detail = `  ${c.green}"${text.replace(/\n/g, ' ').slice(0, 70)}"${c.reset}`
+    } else if (rawType === 'tool_called') {
+      const tool = (p.tool as string) ?? '?'
+      const filePath = p.file_path as string | undefined
+      const input = p.input as Record<string, unknown> | undefined
+      const file = filePath ?? (input?.file_path as string | undefined) ?? ''
+      const shortFile = file ? ` → ${file.split('/').slice(-2).join('/')}` : ''
+      detail = `  ${c.bold}${tool}${c.reset}${c.dim}${shortFile}${c.reset}`
+    } else if (rawType.startsWith('object.')) {
+      const objType = p.objectType as string | undefined
+      if (objType) detail = `  ${c.dim}${objType}${c.reset}`
+    }
+
+    const actor = event.actor ?? 'runtime'
+    const actorStr = actor === 'agent' ? `${c.cyan}agent  ${c.reset}`
+      : actor === 'user' ? `${c.green}user   ${c.reset}`
+      : `${c.dim}${actor.padEnd(7)}${c.reset}`
+
+    const typePadded = `[${rawType}]`.padEnd(22)
+    console.log(`  ${typeColor}${typePadded}${c.reset} ${actorStr}${detail}`)
+  }
+
+  console.log()
   console.log(`${c.dim}Total: ${events.length} events${c.reset}`)
+  console.log(`${c.dim}Use --verbose for full detail per event${c.reset}`)
 }
 
 async function cmdBlame(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -660,6 +729,493 @@ async function cmdExplore(positional: string[], flags: Record<string, string | b
   console.log(`${c.green}Winner:${c.reset} ${c.bold}${result.winnerId}${c.reset} (score: ${result.winnerScore.toFixed(3)})`)
 }
 
+async function cmdInspect(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session inspect --graph <id> [--event <evt-id>]`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    storage.close()
+    process.exit(0)
+  }
+
+  // If --event specified, show single event detail
+  const eventId = flags['event'] as string | undefined
+  if (eventId) {
+    const event = events.find((e) => e.id === eventId || e.id.startsWith(eventId))
+    storage.close()
+    if (!event) {
+      console.error(`${c.red}Error:${c.reset} Event not found: ${eventId}`)
+      process.exit(1)
+    }
+    if (flags['json']) {
+      console.log(JSON.stringify(event, null, 2))
+      return
+    }
+    console.log(`${c.bold}Event:${c.reset} ${c.yellow}${event.id}${c.reset}`)
+    console.log(`${c.bold}Type:${c.reset}  ${c.cyan}${event.type}${c.reset}`)
+    console.log(`${c.bold}Time:${c.reset}  ${formatTimestamp(event.timestamp)}`)
+    console.log(`${c.bold}Actor:${c.reset} ${event.actor ?? 'runtime'}`)
+    if (event.causedBy) {
+      console.log(`${c.bold}Caused by:${c.reset} ${c.dim}${event.causedBy}${c.reset}`)
+    }
+    console.log()
+    console.log(`${c.bold}Payload:${c.reset}`)
+    console.log(JSON.stringify(event.payload, null, 2))
+    return
+  }
+
+  // Otherwise show run summary (like ActiveGraph's inspect)
+  storage.close()
+
+  const goalEvents = events.filter((e) => e.type === 'goal.set')
+  const toolEvents = events.filter((e) => e.type === 'custom.tool_called')
+  const blameEvents = events.filter((e) => e.type === 'custom.blame_recorded')
+  const totalCost = blameEvents.reduce((sum, e) => sum + ((e.payload.cost as number) ?? 0), 0)
+  const firstTs = events[0].timestamp
+  const lastTs = events[events.length - 1].timestamp
+
+  // Extract model(s) used in the session
+  const models = new Map<string, number>()
+  for (const e of blameEvents) {
+    const model = e.payload.model as string | undefined
+    if (model && model !== 'unknown') {
+      models.set(model, (models.get(model) ?? 0) + 1)
+    }
+  }
+  const modelList = Array.from(models.entries()).sort((a, b) => b[1] - a[1])
+
+  // Extract total tokens
+  const totalInput = blameEvents.reduce((sum, e) => sum + ((e.payload.input_tokens as number) ?? 0), 0)
+  const totalOutput = blameEvents.reduce((sum, e) => sum + ((e.payload.output_tokens as number) ?? 0), 0)
+  const totalCacheRead = blameEvents.reduce((sum, e) => sum + ((e.payload.cache_read_input_tokens as number) ?? 0), 0)
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      graphId,
+      state: 'committed',
+      events: events.length,
+      goals: goalEvents.length,
+      toolCalls: toolEvents.length,
+      totalCost,
+      models: Object.fromEntries(models),
+      tokens: { input: totalInput, output: totalOutput, cacheRead: totalCacheRead },
+      firstEvent: firstTs,
+      lastEvent: lastTs,
+      tailEvents: events.slice(-5).map((e) => ({ id: e.id, type: e.type, timestamp: e.timestamp })),
+    }, null, 2))
+    return
+  }
+
+  console.log(`${c.bold}Inspect:${c.reset} ${c.yellow}${graphId}${c.reset}`)
+  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}State:${c.reset}       committed`)
+  console.log(`  ${c.bold}Events:${c.reset}      ${events.length}`)
+  console.log(`  ${c.bold}Goals:${c.reset}       ${goalEvents.length}`)
+  console.log(`  ${c.bold}Tool calls:${c.reset}  ${toolEvents.length}`)
+  if (modelList.length > 0) {
+    const primary = modelList[0]
+    console.log(`  ${c.bold}Model:${c.reset}       ${c.cyan}${primary[0]}${c.reset} ${c.dim}(${primary[1]} calls)${c.reset}`)
+    for (const [model, count] of modelList.slice(1)) {
+      console.log(`               ${c.cyan}${model}${c.reset} ${c.dim}(${count} calls)${c.reset}`)
+    }
+  }
+  console.log(`  ${c.bold}Total cost:${c.reset}  $${totalCost.toFixed(2)}`)
+  console.log(`  ${c.bold}Tokens:${c.reset}      ${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out / ${formatTokens(totalCacheRead)} cached`)
+  console.log(`  ${c.bold}First event:${c.reset} ${formatTimestamp(firstTs)}`)
+  console.log(`  ${c.bold}Last event:${c.reset}  ${formatTimestamp(lastTs)}`)
+  console.log()
+
+  // Tail of recent events
+  const tail = parseInt(flags['tail'] as string ?? '5', 10)
+  console.log(`  ${c.bold}Recent events (tail ${tail}):${c.reset}`)
+  for (const event of events.slice(-tail)) {
+    const shortId = event.id.slice(0, 12)
+    console.log(`    ${c.dim}${shortId}${c.reset} ${c.cyan}${event.type}${c.reset} ${c.dim}${formatTimestamp(event.timestamp)}${c.reset}`)
+  }
+}
+
+async function cmdFork(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = flags['graph'] as string | undefined
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} --graph is required.`)
+    console.error(`Usage: operad-session fork --graph <id> --at-event <evt> [--label <name>]`)
+    process.exit(1)
+  }
+
+  const atEvent = (flags['at-event'] as string) ?? positional[0]
+  if (!atEvent) {
+    console.error(`${c.red}Error:${c.reset} --at-event is required.`)
+    console.error(`Usage: operad-session fork --graph <id> --at-event <evt> [--label <name>]`)
+    process.exit(1)
+  }
+
+  const label = (flags['label'] as string) ?? 'fork'
+  const runInstruction = flags['run'] as string | undefined
+  const model = (flags['model'] as string) ?? 'claude-sonnet-4'
+  const maxBudget = parseFloat((flags['max-budget'] as string) ?? '5.00')
+  const noDiff = flags['no-diff'] === true
+
+  const storage = getStorage()
+  const runtime = createRuntime({ storage })
+
+  let branchGraph: Awaited<ReturnType<typeof runtime.branch>>
+  try {
+    branchGraph = await runtime.branch(graphId, {
+      atEvent,
+      label,
+    })
+  } catch (err) {
+    console.error(`${c.red}Error:${c.reset} ${(err as Error).message}`)
+    storage.close()
+    process.exit(1)
+  }
+
+  console.log(`${c.green}Forked${c.reset} ${c.yellow}${graphId}${c.reset} at event ${c.cyan}${atEvent.slice(0, 12)}${c.reset}`)
+  console.log(`  ${c.bold}Branch:${c.reset} ${c.cyan}${branchGraph.id}${c.reset}`)
+  console.log()
+
+  // ─── --run: Execute Claude CLI on the fork ───────────────────────────────
+  if (runInstruction) {
+    // 1. Extract context from parent graph up to fork point
+    const events = await storage.queryEvents(graphId, {})
+    const { systemPrompt, workingDir } = extractForkContext(events, atEvent)
+
+    // 2. Spawn Claude CLI
+    const sessionId = randomUUID()
+    console.log(`${c.bold}Running Claude${c.reset} (${c.dim}${model}, budget: $${maxBudget.toFixed(2)}${c.reset})`)
+    console.log(`  ${c.bold}Prompt:${c.reset} "${runInstruction}"`)
+    console.log(`  ⏳ Executing...`)
+    console.log()
+
+    const cwd = workingDir ?? process.cwd()
+    const result = spawnSync('claude', [
+      '--print',
+      '--model', model,
+      '--system-prompt', systemPrompt,
+      '--session-id', sessionId,
+      '--output-format', 'text',
+      '--max-turns', '50',
+      '--dangerously-skip-permissions',
+      runInstruction,
+    ], {
+      cwd,
+      env: {
+        ...process.env,
+        OPERAD_GRAPH_ID: branchGraph.id,
+        OPERAD_DB_PATH: DB_PATH,
+      },
+      stdio: ['pipe', 'inherit', 'inherit'],
+      timeout: 300_000, // 5 minute timeout
+    })
+
+    if (result.error) {
+      console.error(`${c.red}Error spawning Claude:${c.reset} ${result.error.message}`)
+      storage.close()
+      process.exit(1)
+    }
+
+    if (result.status !== 0) {
+      console.error(`${c.red}Claude exited with code ${result.status}${c.reset}`)
+    }
+
+    // 3. Find the JSONL file (Claude CLI writes to ~/.claude/projects/<project>/<session-id>.jsonl)
+    const claudeDir = join(homedir(), '.claude', 'projects')
+    const jsonlPath = findJsonlBySessionId(claudeDir, sessionId)
+
+    if (jsonlPath) {
+      // 4. Commit JSONL to the fork graph
+      const jsonlText = readFileSync(jsonlPath, 'utf-8')
+      const sessionLog = await commit(jsonlText, {
+        storage,
+        runtime,
+        graphId: branchGraph.id,
+      })
+
+      console.log()
+      console.log(`  ${c.green}✅ Done${c.reset} — ${sessionLog.toolCalls} tool calls, $${sessionLog.blame.totalCost.toFixed(2)}`)
+      console.log(`  ${c.dim}Committed to fork graph: ${branchGraph.id}${c.reset}`)
+    } else {
+      console.log()
+      console.log(`  ${c.yellow}⚠ No JSONL found${c.reset} for session ${sessionId.slice(0, 8)}...`)
+      console.log(`  ${c.dim}Claude may not have written a session file.${c.reset}`)
+    }
+
+    // 5. Auto-diff parent vs fork
+    if (!noDiff) {
+      console.log()
+      try {
+        const diff = await runtime.diff(graphId, branchGraph.id)
+        const added = diff.objects.filter((o) => o.status === 'added').length +
+          diff.relations.filter((r) => r.status === 'added').length
+        const removed = diff.objects.filter((o) => o.status === 'removed').length +
+          diff.relations.filter((r) => r.status === 'removed').length
+
+        console.log(`${c.bold}Diff:${c.reset} ${c.yellow}${graphId}${c.reset} ↔ ${c.cyan}${branchGraph.id}${c.reset}`)
+        console.log(`  ${c.green}+${added}${c.reset} added, ${c.red}-${removed}${c.reset} removed`)
+        console.log(`  Original: ${diff.sourceLog.length} events | Fork: ${diff.targetLog.length} events`)
+      } catch {
+        // Diff may fail if parent has no divergent events — that's fine
+        console.log(`${c.dim}(diff skipped — no divergent events yet)${c.reset}`)
+      }
+    }
+
+    storage.close()
+    return
+  }
+
+  // ─── Without --run: existing behavior (empty fork) ───────────────────────
+  storage.close()
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      parentGraphId: graphId,
+      forkGraphId: branchGraph.id,
+      atEvent,
+      label,
+    }, null, 2))
+    return
+  }
+
+  console.log(`  ${c.bold}Label:${c.reset}     ${label}`)
+  console.log()
+  console.log(`${c.dim}Use "operad-session diff ${graphId} ${branchGraph.id}" to compare after making changes.${c.reset}`)
+}
+
+/**
+ * Recursively search for a JSONL file matching a session ID under a directory.
+ * Claude CLI writes session files as: ~/.claude/projects/<project-hash>/<session-id>.jsonl
+ */
+function findJsonlBySessionId(baseDir: string, sessionId: string): string | null {
+  if (!existsSync(baseDir)) return null
+
+  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs')
+  const targetFilename = `${sessionId}.jsonl`
+
+  try {
+    const entries = readdirSync(baseDir)
+    for (const entry of entries) {
+      const fullPath = join(baseDir, entry)
+      const stat = statSync(fullPath)
+      if (stat.isDirectory()) {
+        // Check if the target file is in this subdirectory
+        const candidate = join(fullPath, targetFilename)
+        if (existsSync(candidate)) return candidate
+        // Also check nested dirs (one level deep is usually enough)
+        const nested = findJsonlBySessionId(fullPath, sessionId)
+        if (nested) return nested
+      } else if (entry === targetFilename) {
+        return fullPath
+      }
+    }
+  } catch {
+    // Permission errors or missing dirs — ignore
+  }
+  return null
+}
+
+async function cmdReplay(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session replay --graph <id> [--to-event <evt>]`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    storage.close()
+    process.exit(0)
+  }
+
+  const toEvent = flags['to-event'] as string | undefined
+
+  // Rebuild graph from events up to the specified point
+  const runtime = createRuntime({ storage })
+
+  if (toEvent) {
+    // Checkout to specific event
+    try {
+      await runtime.checkout(graphId, toEvent)
+    } catch (err) {
+      console.error(`${c.red}Error:${c.reset} ${(err as Error).message}`)
+      storage.close()
+      process.exit(1)
+    }
+  }
+
+  const objects = await storage.queryObjects(graphId, {})
+  const relations = await storage.queryRelations(graphId, {})
+  storage.close()
+
+  if (flags['json']) {
+    console.log(JSON.stringify({
+      graphId,
+      replayedTo: toEvent ?? events[events.length - 1].id,
+      objects: objects.length,
+      relations: relations.length,
+      events: events.length,
+    }, null, 2))
+    return
+  }
+
+  const target = toEvent ? `event ${toEvent.slice(0, 12)}` : 'latest'
+  console.log(`${c.bold}Replayed${c.reset} ${c.yellow}${graphId}${c.reset} to ${c.cyan}${target}${c.reset}`)
+  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}Events:${c.reset}    ${events.length}`)
+  console.log(`  ${c.bold}Objects:${c.reset}   ${objects.length}`)
+  console.log(`  ${c.bold}Relations:${c.reset} ${relations.length}`)
+
+  // Type breakdown
+  const byType: Record<string, number> = {}
+  for (const obj of objects) {
+    byType[obj.type] = (byType[obj.type] ?? 0) + 1
+  }
+  console.log()
+  console.log(`  ${c.bold}Object types:${c.reset}`)
+  for (const [type, count] of Object.entries(byType).sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${String(count).padStart(3)} ${type}`)
+  }
+}
+
+async function cmdExportTrace(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session export-trace --graph <id> [--format jsonl|text] [--out <path>]`)
+    process.exit(1)
+  }
+
+  const format = (flags['format'] as string) ?? 'jsonl'
+  const outPath = flags['out'] as string | undefined
+
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+  storage.close()
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    process.exit(0)
+  }
+
+  let output: string
+
+  if (format === 'jsonl') {
+    output = events.map((e) => JSON.stringify(e)).join('\n') + '\n'
+  } else {
+    // Text format: human-readable trace
+    const lines: string[] = []
+    lines.push(`# Trace: ${graphId}`)
+    lines.push(`# Events: ${events.length}`)
+    lines.push(`# Exported: ${new Date().toISOString()}`)
+    lines.push('')
+
+    for (const event of events) {
+      const ts = formatTimestamp(event.timestamp)
+      const actor = event.actor ?? 'runtime'
+      lines.push(`[${ts}] ${event.type} (${actor})`)
+
+      if (event.payload.goal) lines.push(`  goal: ${event.payload.goal}`)
+      if (event.payload.tool) lines.push(`  tool: ${event.payload.tool}`)
+      if (event.payload.file_path) lines.push(`  file: ${event.payload.file_path}`)
+      if (event.payload.cost) lines.push(`  cost: $${(event.payload.cost as number).toFixed(4)}`)
+      lines.push('')
+    }
+    output = lines.join('\n')
+  }
+
+  if (outPath) {
+    writeFileSync(resolve(outPath), output, 'utf-8')
+    console.error(`${c.green}Exported${c.reset} ${events.length} events to ${outPath} (${format})`)
+  } else {
+    // Write to stdout
+    process.stdout.write(output)
+  }
+}
+
+async function cmdView(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session view --graph <id>`)
+    process.exit(1)
+  }
+
+  const storage = getStorage()
+
+  // Objects + relations were projected during `commit` — just query them
+  let objects = await storage.queryObjects(graphId, {})
+  let relations = await storage.queryRelations(graphId, {})
+
+  if (objects.length === 0) {
+    // Fallback: maybe only events exist (committed with older version)
+    // Re-project from events
+    const events = await storage.queryEvents(graphId, {})
+    if (events.length === 0) {
+      console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+      storage.close()
+      process.exit(0)
+    }
+
+    const runtime = createRuntime({ storage })
+    const graph = runtime.getGraph(graphId)
+    const { projectGraph } = await import('./projector.js')
+    await projectGraph(graph, events)
+
+    objects = await storage.queryObjects(graphId, {})
+    relations = await storage.queryRelations(graphId, {})
+  }
+  storage.close()
+
+  const renderableObjects: RenderableObject[] = objects.map((o) => ({
+    id: o.id,
+    type: o.type,
+    data: { ...o.data, _createdAt: o.createdAt } as Record<string, unknown>,
+  }))
+
+  const renderableRelations: RenderableRelation[] = relations.map((r) => ({
+    sourceId: r.sourceId,
+    targetId: r.targetId,
+    type: r.type,
+  }))
+
+  const html = renderHtmlGraph(renderableObjects, renderableRelations, {
+    title: `Session: ${graphId}`,
+  })
+
+  // Write output
+  const outputPath = (flags['output'] as string)
+    ? resolve(flags['output'] as string)
+    : join(tmpdir(), `operad-graph-${graphId.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`)
+
+  writeFileSync(outputPath, html, 'utf-8')
+  console.log(`${c.green}Wrote${c.reset} ${outputPath}`)
+  console.log(`${c.dim}${renderableObjects.length} nodes, ${renderableRelations.length} edges${c.reset}`)
+
+  // Auto-open in browser unless --no-open
+  if (!flags['no-open']) {
+    try {
+      const cmd = platform() === 'darwin' ? 'open' : 'xdg-open'
+      execSync(`${cmd} "${outputPath}"`, { stdio: 'ignore' })
+      console.log(`${c.cyan}Opened${c.reset} in default browser`)
+    } catch {
+      console.log(`${c.yellow}Could not auto-open.${c.reset} Open manually: ${outputPath}`)
+    }
+  }
+}
+
 // ─── Stash Helpers ──────────────────────────────────────────────────────────
 
 interface FileReadInfo {
@@ -722,12 +1278,22 @@ ${c.bold}USAGE${c.reset}
 
 ${c.bold}COMMANDS${c.reset}
   ${c.green}commit${c.reset} <path.jsonl>          Import JSONL into the persistent graph
+  ${c.green}inspect${c.reset} --graph <id>          Show run summary (events, goals, cost, tail)
+  ${c.green}inspect${c.reset} --graph <id> --event <evt>  Show full payload for one event
   ${c.green}graph${c.reset} --graph <id>            Show ASCII event graph (turn-based view)
   ${c.green}log${c.reset} --graph <id>             Show event history (like git log)
   ${c.green}blame${c.reset} --graph <id>           Show cost per goal (which goal spent how much)
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
+  ${c.green}fork${c.reset} --graph <id> --at-event <evt>  Fork a session at an event
+        [--run "<instruction>"]      Run Claude on the fork with new instructions
+        [--model <model>]            Model to use (default: claude-sonnet-4)
+        [--max-budget <dollars>]     Budget cap (default: 5.00)
+        [--no-diff]                  Skip auto-diff after run
+  ${c.green}replay${c.reset} --graph <id>           Rebuild graph from events (time-travel)
+  ${c.green}export-trace${c.reset} --graph <id>     Export trace as JSONL or text
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
+  ${c.green}view${c.reset} --graph <id>            Open interactive timeline in browser
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
 
 ${c.bold}GLOBAL OPTIONS${c.reset}
@@ -739,23 +1305,39 @@ ${c.bold}STORAGE${c.reset}
   All data is persisted to: ${c.dim}${DB_PATH}${c.reset}
 
 ${c.bold}EXAMPLES${c.reset}
-  ${c.dim}# Import a session${c.reset}
+  ${c.dim}# Import a Claude Code session${c.reset}
   operad-session commit ~/.claude/projects/myapp/session.jsonl
 
-  ${c.dim}# View event log${c.reset}
-  operad-session log --graph session_1716000000000
+  ${c.dim}# Inspect a session${c.reset}
+  operad-session inspect --graph session_1716000000000
+
+  ${c.dim}# View a single event's full payload${c.reset}
+  operad-session inspect --graph session_1716000000000 --event evt_17160000
+
+  ${c.dim}# Fork at an event (empty fork for manual changes)${c.reset}
+  operad-session fork --graph session_1716000000000 --at-event evt_17160000 --label cautious
+
+  ${c.dim}# Fork and run Claude with alternative instructions${c.reset}
+  operad-session fork --graph session_1716000000000 --at-event evt_17160000 \\
+    --run "Use session cookies instead of JWT" --model claude-sonnet-4 --max-budget 2.00
+
+  ${c.dim}# Compare parent vs fork${c.reset}
+  operad-session diff session_1716000000000 session_1716000000000_cautious
+
+  ${c.dim}# Replay to a specific point (time-travel)${c.reset}
+  operad-session replay --graph session_1716000000000 --to-event evt_17160000
+
+  ${c.dim}# Export trace as JSONL (pipe to other tools)${c.reset}
+  operad-session export-trace --graph session_1716000000000 --format jsonl --out trace.jsonl
+
+  ${c.dim}# Open interactive timeline in browser${c.reset}
+  operad-session view --graph session_1716000000000
 
   ${c.dim}# See cost breakdown per goal${c.reset}
   operad-session blame --graph session_1716000000000
 
-  ${c.dim}# Compare two sessions${c.reset}
-  operad-session diff session_a session_b
-
   ${c.dim}# Find wasted reads${c.reset}
   operad-session stash --graph session_1716000000000
-
-  ${c.dim}# Revert to a specific point${c.reset}
-  operad-session revert evt_17160000 --graph session_1716000000000
 
   ${c.dim}# Explore 3 branches from a point${c.reset}
   operad-session explore evt_17160000 -n 3 --graph session_1716000000000
@@ -782,6 +1364,9 @@ async function main() {
     case 'commit':
       await cmdCommit(positional, flags)
       break
+    case 'inspect':
+      await cmdInspect(positional, flags)
+      break
     case 'graph':
       await cmdGraph(positional, flags)
       break
@@ -794,6 +1379,15 @@ async function main() {
     case 'diff':
       await cmdDiff(positional, flags)
       break
+    case 'fork':
+      await cmdFork(positional, flags)
+      break
+    case 'replay':
+      await cmdReplay(positional, flags)
+      break
+    case 'export-trace':
+      await cmdExportTrace(positional, flags)
+      break
     case 'stash':
       await cmdStash(positional, flags)
       break
@@ -802,6 +1396,9 @@ async function main() {
       break
     case 'explore':
       await cmdExplore(positional, flags)
+      break
+    case 'view':
+      await cmdView(positional, flags)
       break
     default:
       // Backward compat: if it looks like a file path, treat as commit

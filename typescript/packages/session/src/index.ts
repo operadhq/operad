@@ -20,6 +20,9 @@ export { commit, type CommitOptions } from './session.js'
 export { createRuntime } from '@operad/core'
 export { MemoryAdapter } from '@operad/adapter-memory'
 
+// Visualization
+export { renderHtmlGraph, type RenderHtmlOptions, type BranchInfo, type DiffEntry } from './render-html.js'
+
 // Subsystems (for advanced usage)
 export { parseAndEmit, type ParseStats } from './parser.js'
 export { computeMessageCost, aggregateBlame } from './cost.js'
@@ -40,6 +43,10 @@ export type { FileState, ToolHistoryEntry } from './query.js'
 // Subagent graph sharing
 export { forkForSubagent, detectParentGraph } from './subagent.js'
 export type { ForkResult } from './subagent.js'
+
+// Fork context extraction (for --run and programmatic fork-and-run)
+export { extractForkContext } from './context.js'
+export type { ForkContext } from './context.js'
 
 // Types
 export type {
