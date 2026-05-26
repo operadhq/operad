@@ -4,43 +4,27 @@
 
 Every mutation is an event. Every event has a cause. Every decision is recorded.
 
+### Try it now
+
 ```bash
 npx @operad/session demo coding --html
 ```
 
+Opens an interactive timeline viewer in your browser — swim lanes, causal chains, and waterfall phases for a coding agent session.
+
+**More demos:**
+
+```bash
+npx @operad/session demo hedge-fund --html         # Biotech screening, position sizing
+npx @operad/session demo insurance --html           # Claims processing, fraud detection
+npx @operad/session demo financial-analyst --html   # Revenue analysis, forecasting
+npx @operad/session demo customer-support --html    # Debugging, post-mortems
+npx @operad/session demo research-agent --html      # Literature survey, benchmarks
+npx @operad/session demo primitives --html          # All 7 runtime primitives
+```
+
 > **Cloud viewer coming soon** — share agent sessions with your team via URL.
 > [**Get notified →**](https://operad.sh/#notify)
-
-```
-◆ Operad — 7 New Primitives Demo
-
-── 1. Actor Field ──────────────────────────────
-  ✓ Created graph (actor: "user")
-  + Claim 1: Water damage - basement
-  + Claim 2: Water damage - kitchen
-
-── Graph Visualization ─────────────────────────
-
-  ╭─ ● claim ───────────────────────────────────────────╮
-  │  claim-001                                           │
-  │  title: "Water damage - basement"                    │
-  │  amount: 35000                                       │
-  │  status: "open"                                      │
-  ├──────────────────────────────────────────────────────┤
-  │  ├──▶ depends_on ── evidence:evidence-001             │
-  │  └──▶ contradicts ── claim:claim-002                  │
-  ╰──────────────────────────────────────────────────────╯
-       │
-       ▼
-  ╭─ ● evidence ────────────────────────────────────────╮
-  │  evidence-001                                        │
-  │  title: "Plumber report"                             │
-  │  confidence: 0.95                                    │
-  │  verified: true                                      │
-  ╰──────────────────────────────────────────────────────╯
-
-◆ All 7 primitives exercised. Every action is event-sourced.
-```
 
 ---
 

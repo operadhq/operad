@@ -15,22 +15,16 @@ operad-session log --graph <session-id>
 ### Try the interactive demos
 
 ```bash
-operad-session demo primitives        # Runtime primitives (actor, behaviors, patches, forking)
-operad-session demo coding            # Coding agent — JWT auth with thinking + tool use
-operad-session demo financial-analyst  # SaaS revenue analysis and forecasting
-operad-session demo insurance          # Claims processing with fraud detection
-operad-session demo customer-support   # Debugging permissions, fixing code
-operad-session demo hedge-fund         # Biotech screening and position sizing
-operad-session demo research-agent     # RAG literature survey and benchmarks
+operad-session demo coding --html              # Coding agent — JWT auth with thinking + tool use
+operad-session demo hedge-fund --html          # Biotech screening, thesis building, position sizing
+operad-session demo insurance --html           # Claims processing with fraud detection
+operad-session demo financial-analyst --html   # SaaS revenue analysis and forecasting
+operad-session demo customer-support --html    # Debugging permissions, fixing code, post-mortems
+operad-session demo research-agent --html      # RAG literature survey and benchmarks
+operad-session demo primitives --html          # All 7 runtime primitives
 ```
 
-Add `--html` to open the interactive timeline viewer in your browser:
-
-```bash
-operad-session demo coding --html
-```
-
-The timeline viewer includes three visualization modes:
+Each opens an interactive timeline viewer with three modes:
 - **Swim Lanes** — events by actor (user / agent / thinking) with causal arrows
 - **Causal Chain** — tree view showing event causality (like `git log --graph`)
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
