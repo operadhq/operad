@@ -9,7 +9,7 @@ npx @operad/session demo coding --html
 ```
 
 > **Cloud viewer coming soon** — share agent sessions with your team via URL.
-> [**Get notified →**](https://operad.dev/#notify)
+> [**Get notified →**](https://operad.sh/#notify)
 
 ```
 ◆ Operad — 7 New Primitives Demo
@@ -399,7 +399,7 @@ Each opens an interactive HTML viewer with three timeline modes:
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
 
 > **Want to share sessions with your team?** The cloud viewer is coming.
-> [**Sign up for early access →**](https://operad.dev/#notify)
+> [**Sign up for early access →**](https://operad.sh/#notify)
 
 ### Runtime demos
 
