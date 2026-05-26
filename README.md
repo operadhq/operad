@@ -347,6 +347,7 @@ See [`examples/`](./typescript/packages/session/examples/) for use-case workflow
 - **Healthcare** — Provenance tracking for AI diagnostic recommendations
 - **Finance** — Regulatory compliance with full causal chain evidence
 - **Multi-step agents** — Self-healing workflows with reactive error handling
+- **Knowledge management** — Graphs that detect and flag stale data
 
 ---
 
