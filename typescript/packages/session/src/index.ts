@@ -21,7 +21,7 @@ export { createRuntime } from '@operad/core'
 export { MemoryAdapter } from '@operad/adapter-memory'
 
 // Visualization
-export { renderHtmlGraph, type RenderHtmlOptions, type BranchInfo, type DiffEntry } from './render-html.js'
+export { renderHtmlGraph, renderSessionHtml, type RenderHtmlOptions, type RenderSessionOptions, type BranchInfo, type DiffEntry } from './render-html.js'
 
 // Subsystems (for advanced usage)
 export { parseAndEmit, type ParseStats } from './parser.js'
@@ -47,6 +47,10 @@ export type { ForkResult } from './subagent.js'
 // Fork context extraction (for --run and programmatic fork-and-run)
 export { extractForkContext } from './context.js'
 export type { ForkContext } from './context.js'
+
+// Multi-harness hook installation
+export { detectHarnesses, installHooks, installClaudeHooks, installCodexHooks, installOpenCodePlugin } from './harness.js'
+export type { HarnessType, DetectedHarness, InitResult } from './harness.js'
 
 // Types
 export type {

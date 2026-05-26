@@ -26,8 +26,10 @@ import type { GraphEvent, GraphDiff, RevertResult, ExploreResult } from '@operad
 import { SqliteAdapter } from '@operad/adapter-sqlite'
 import { commit } from './session.js'
 import { detectStash } from './waste.js'
-import { renderHtmlGraph } from './render-html.js'
+import { renderHtmlGraph, renderSessionHtml } from './render-html.js'
 import { extractForkContext } from './context.js'
+import { detectHarnesses, installHooks } from './harness.js'
+import type { HarnessType } from './harness.js'
 import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -515,8 +517,104 @@ async function cmdGraph(positional: string[], flags: Record<string, string | boo
   console.log(`╚${'═'.repeat(66)}╝`)
   console.log()
 
-  // Build turns (goal → events until next goal)
+  // ── --stream mode: chronological event stream ─────────────────────────
+  if (flags['stream']) {
+    renderEventStream(events)
+    return
+  }
+
+  // ── Default: goal traces ──────────────────────────────────────────────
+  renderGoalTraces(events, goalEvents, toolEvents, blameEvents, totalCost, flags)
+}
+
+function renderEventStream(events: GraphEvent[]): void {
+  const redundantIndices = detectRedundantReads(events)
+
+  // Filter out internal bookkeeping noise
+  const internalTypes = new Set([
+    'custom.blame_recorded',
+    'custom.assistant_responded',
+    'custom.reasoning_trace',
+  ])
+  const traceEvents = events
+    .map((e, i) => ({ event: e, originalIndex: i }))
+    .filter(({ event }) => !internalTypes.has(event.type))
+
+  for (const { event, originalIndex } of traceEvents) {
+    const rawType = event.type.replace(/^custom\./, '')
+
+    // Timestamp (HH:MM:SS)
+    const ts = new Date(event.timestamp)
+    const timeStr = `${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
+
+    // Icon + color by type
+    let icon: string
+    let typeColor: string
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      icon = '●'; typeColor = c.green
+    } else if (rawType === 'tool_called') {
+      const tool = (event.payload.tool as string) ?? ''
+      if (['Read', 'Grep', 'Glob'].includes(tool)) {
+        icon = '○'; typeColor = c.green
+      } else if (['Edit', 'Write'].includes(tool)) {
+        icon = '◆'; typeColor = c.yellow
+      } else if (tool === 'Bash') {
+        icon = '◆'; typeColor = c.magenta
+      } else {
+        icon = '○'; typeColor = c.cyan
+      }
+    } else if (rawType === 'decision') {
+      icon = '◆'; typeColor = c.yellow
+    } else {
+      icon = '·'; typeColor = c.dim
+    }
+
+    // Detail string
+    let detail = ''
+    const p = event.payload
+
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      const text = (p.text as string) ?? (p.goal as string) ?? ''
+      detail = `"${text.replace(/\n/g, ' ').slice(0, 60)}"`
+    } else if (rawType === 'tool_called') {
+      const tool = (p.tool as string) ?? '?'
+      const input = p.input as Record<string, unknown> | undefined
+      const filePath = (p.file_path as string) ?? (input?.file_path as string) ?? ''
+      const shortFile = filePath ? filePath.split('/').slice(-2).join('/') : ''
+
+      // Redundant read marker
+      const isRedundant = redundantIndices.has(originalIndex)
+      const redundantMarker = isRedundant ? ` ${c.red}← redundant${c.reset}` : ''
+
+      detail = `${c.bold}${tool}${c.reset}${shortFile ? ` ${c.dim}${shortFile}${c.reset}` : ''}${redundantMarker}`
+    } else if (rawType.startsWith('object.') || rawType.startsWith('relation.')) {
+      const objType = p.objectType as string | undefined
+      if (objType) detail = objType
+    }
+
+    const typePadded = rawType.padEnd(20)
+    console.log(`  ${c.dim}${timeStr}${c.reset}  ${typeColor}${icon}${c.reset} ${typeColor}${typePadded}${c.reset} ${detail}`)
+  }
+
+  console.log()
+  const redundantCount = redundantIndices.size
+  if (redundantCount > 0) {
+    console.log(`  ${c.red}⚠ ${redundantCount} redundant read${redundantCount > 1 ? 's' : ''}${c.reset} detected`)
+  }
+  console.log(`  ${c.dim}Use without --stream for goal traces view${c.reset}`)
+}
+
+function renderGoalTraces(
+  events: GraphEvent[],
+  goalEvents: GraphEvent[],
+  toolEvents: GraphEvent[],
+  _blameEvents: GraphEvent[],
+  _totalCost: number,
+  flags: Record<string, string | boolean>,
+): void {
   const turns = buildTurns(events)
+  const redundantIndices = detectRedundantReads(events)
+  const stash = detectStash(events)
 
   const maxTurns = parseInt(flags['limit'] as string ?? '20', 10)
   const showAll = flags['all'] as boolean
@@ -527,6 +625,20 @@ async function cmdGraph(positional: string[], flags: Record<string, string | boo
     const turnToolEvents = turn.events.filter(e => e.type === 'custom.tool_called')
     const turnBlame = turn.events.filter(e => e.type === 'custom.blame_recorded')
     const turnCost = turnBlame.reduce((sum, e) => sum + ((e.payload.cost as number) ?? 0), 0)
+
+    // Duration
+    const turnAllEvents = [{ timestamp: turn.events[0]?.timestamp ?? '' }, ...turn.events]
+    const firstTs = turnAllEvents.find(e => e.timestamp)?.timestamp
+    const lastTs = turn.events[turn.events.length - 1]?.timestamp
+    let durationStr = ''
+    if (firstTs && lastTs) {
+      const durMs = new Date(lastTs).getTime() - new Date(firstTs).getTime()
+      if (durMs > 0) {
+        const mins = Math.floor(durMs / 60000)
+        const secs = Math.floor((durMs % 60000) / 1000)
+        durationStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+      }
+    }
 
     // Tool breakdown
     const tools: Record<string, number> = {}
@@ -539,15 +651,55 @@ async function cmdGraph(positional: string[], flags: Record<string, string | boo
       .map(([t, n]) => n > 1 ? `${t}×${n}` : t)
       .join(', ')
 
-    console.log(`  ${c.green}★${c.reset} ${c.bold}Goal #${i + 1}:${c.reset} ${goalText}`)
+    // File interaction summary
+    const fileInteractions = new Map<string, { reads: number; edits: number }>()
+    for (const e of turnToolEvents) {
+      const tool = (e.payload.tool as string) ?? ''
+      const input = e.payload.input as Record<string, unknown> | undefined
+      const filePath = (e.payload.file_path as string) ?? (input?.file_path as string) ?? ''
+      if (!filePath) continue
+      const shortFile = filePath.split('/').slice(-2).join('/')
+      const record = fileInteractions.get(shortFile) ?? { reads: 0, edits: 0 }
+      if (tool === 'Read') record.reads++
+      else if (tool === 'Edit' || tool === 'Write') record.edits++
+      fileInteractions.set(shortFile, record)
+    }
+
+    // Count redundant reads in this turn
+    let turnRedundantCount = 0
+    for (const e of turn.events) {
+      const idx = events.indexOf(e)
+      if (redundantIndices.has(idx)) turnRedundantCount++
+    }
+
+    // Render
+    const costStr = turnCost > 0 ? `${c.yellow}[$${turnCost.toFixed(2)}]${c.reset}` : ''
+    console.log(`  ${c.green}★${c.reset} ${c.bold}Goal #${i + 1}:${c.reset} ${goalText} ${costStr}`)
     console.log(`  │`)
     if (turnToolEvents.length > 0) {
-      console.log(`  ├── ${c.cyan}⚙ Tools:${c.reset} ${toolStr}`)
+      console.log(`  ├── ${c.cyan}⚙${c.reset} ${toolStr}`)
     }
-    if (turnCost > 0) {
-      console.log(`  ├── ${c.yellow}$ Cost:${c.reset} $${turnCost.toFixed(2)}`)
+
+    // Top files (max 3)
+    const topFiles = Array.from(fileInteractions.entries())
+      .sort((a, b) => (b[1].reads + b[1].edits) - (a[1].reads + a[1].edits))
+      .slice(0, 3)
+    for (const [file, info] of topFiles) {
+      const parts: string[] = []
+      if (info.reads > 0) parts.push(`r×${info.reads}`)
+      if (info.edits > 0) parts.push(`e×${info.edits}`)
+      console.log(`  ├── 📄 ${file} ${c.dim}(${parts.join(', ')})${c.reset}`)
     }
-    console.log(`  ├── Events: ${turn.events.length}`)
+    if (fileInteractions.size > 3) {
+      console.log(`  ├── ${c.dim}... +${fileInteractions.size - 3} more files${c.reset}`)
+    }
+
+    if (turnRedundantCount > 0) {
+      console.log(`  ├── ${c.red}⚠ Waste: ${turnRedundantCount} redundant read${turnRedundantCount > 1 ? 's' : ''}${c.reset}`)
+    }
+    if (durationStr) {
+      console.log(`  ├── ${c.dim}⏱ ${durationStr}${c.reset}`)
+    }
     console.log(`  │`)
   }
 
@@ -577,6 +729,14 @@ async function cmdGraph(positional: string[], flags: Record<string, string | boo
     }
     console.log(`  └${'─'.repeat(48)}┘`)
   }
+
+  if (stash.redundantReads > 0) {
+    console.log()
+    console.log(`  ${c.red}⚠ Total waste: ${stash.redundantReads} redundant reads (~${formatTokens(stash.tokensWasted)} tokens, ~$${stash.potentialSavings.toFixed(4)})${c.reset}`)
+  }
+
+  console.log()
+  console.log(`  ${c.dim}Use --stream for chronological event stream view${c.reset}`)
 }
 
 interface Turn {
@@ -1155,56 +1315,88 @@ async function cmdView(positional: string[], flags: Record<string, string | bool
 
   const storage = getStorage()
 
-  // Objects + relations were projected during `commit` — just query them
-  let objects = await storage.queryObjects(graphId, {})
-  let relations = await storage.queryRelations(graphId, {})
+  // ── --classic: old object-tree view ───────────────────────────────────
+  if (flags['classic']) {
+    let objects = await storage.queryObjects(graphId, {})
+    let relations = await storage.queryRelations(graphId, {})
 
-  if (objects.length === 0) {
-    // Fallback: maybe only events exist (committed with older version)
-    // Re-project from events
-    const events = await storage.queryEvents(graphId, {})
-    if (events.length === 0) {
-      console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
-      storage.close()
-      process.exit(0)
+    if (objects.length === 0) {
+      const events = await storage.queryEvents(graphId, {})
+      if (events.length === 0) {
+        console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+        storage.close()
+        process.exit(0)
+      }
+
+      const runtime = createRuntime({ storage })
+      const graph = runtime.getGraph(graphId)
+      const { projectGraph } = await import('./projector.js')
+      await projectGraph(graph, events)
+
+      objects = await storage.queryObjects(graphId, {})
+      relations = await storage.queryRelations(graphId, {})
     }
+    storage.close()
 
-    const runtime = createRuntime({ storage })
-    const graph = runtime.getGraph(graphId)
-    const { projectGraph } = await import('./projector.js')
-    await projectGraph(graph, events)
+    const renderableObjects: RenderableObject[] = objects.map((o) => ({
+      id: o.id,
+      type: o.type,
+      data: { ...o.data, _createdAt: o.createdAt } as Record<string, unknown>,
+    }))
 
-    objects = await storage.queryObjects(graphId, {})
-    relations = await storage.queryRelations(graphId, {})
+    const renderableRelations: RenderableRelation[] = relations.map((r) => ({
+      sourceId: r.sourceId,
+      targetId: r.targetId,
+      type: r.type,
+    }))
+
+    const html = renderHtmlGraph(renderableObjects, renderableRelations, {
+      title: `Session: ${graphId}`,
+    })
+
+    const outputPath = (flags['output'] as string)
+      ? resolve(flags['output'] as string)
+      : join(tmpdir(), `operad-graph-${graphId.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`)
+
+    writeFileSync(outputPath, html, 'utf-8')
+    console.log(`${c.green}Wrote${c.reset} ${outputPath} ${c.dim}(classic view)${c.reset}`)
+    console.log(`${c.dim}${renderableObjects.length} nodes, ${renderableRelations.length} edges${c.reset}`)
+
+    if (!flags['no-open']) {
+      try {
+        const cmd = platform() === 'darwin' ? 'open' : 'xdg-open'
+        execSync(`${cmd} "${outputPath}"`, { stdio: 'ignore' })
+        console.log(`${c.cyan}Opened${c.reset} in default browser`)
+      } catch {
+        console.log(`${c.yellow}Could not auto-open.${c.reset} Open manually: ${outputPath}`)
+      }
+    }
+    return
   }
+
+  // ── Default: new tabbed session view (Event Stream + Goal Traces) ─────
+  const events = await storage.queryEvents(graphId, {})
   storage.close()
 
-  const renderableObjects: RenderableObject[] = objects.map((o) => ({
-    id: o.id,
-    type: o.type,
-    data: { ...o.data, _createdAt: o.createdAt } as Record<string, unknown>,
-  }))
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    process.exit(0)
+  }
 
-  const renderableRelations: RenderableRelation[] = relations.map((r) => ({
-    sourceId: r.sourceId,
-    targetId: r.targetId,
-    type: r.type,
-  }))
-
-  const html = renderHtmlGraph(renderableObjects, renderableRelations, {
+  const html = renderSessionHtml(events, {
     title: `Session: ${graphId}`,
   })
 
-  // Write output
   const outputPath = (flags['output'] as string)
     ? resolve(flags['output'] as string)
-    : join(tmpdir(), `operad-graph-${graphId.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`)
+    : join(tmpdir(), `operad-session-${graphId.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`)
 
   writeFileSync(outputPath, html, 'utf-8')
+  const goalCount = events.filter(e => e.type === 'goal.set').length
+  const toolCount = events.filter(e => e.type === 'custom.tool_called').length
   console.log(`${c.green}Wrote${c.reset} ${outputPath}`)
-  console.log(`${c.dim}${renderableObjects.length} nodes, ${renderableRelations.length} edges${c.reset}`)
+  console.log(`${c.dim}${events.length} events, ${goalCount} goals, ${toolCount} tools${c.reset}`)
 
-  // Auto-open in browser unless --no-open
   if (!flags['no-open']) {
     try {
       const cmd = platform() === 'darwin' ? 'open' : 'xdg-open'
@@ -1218,80 +1410,51 @@ async function cmdView(positional: string[], flags: Record<string, string | bool
 
 // ─── Init Command ───────────────────────────────────────────────────────────
 
-async function cmdInit(): Promise<void> {
-  const settingsDir = join(process.cwd(), '.claude')
-  const settingsPath = join(settingsDir, 'settings.json')
+async function cmdInit(flags: Record<string, string | boolean>): Promise<void> {
+  const cwd = process.cwd()
+  const targetHarness = flags['harness'] as string | undefined
+  const validHarnesses: HarnessType[] = ['claude', 'codex', 'opencode']
 
-  // Build the hooks config
-  const operadHooks = {
-    SessionStart: [
-      {
-        command: `echo '{"hook_type":"SessionStart","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
-        description: 'Initialize Operad graph and print tracking banner',
-      },
-    ],
-    PreToolUse: [
-      {
-        command: `echo '{"hook_type":"PreToolUse","tool_name":"$TOOL_NAME","tool_input":$TOOL_INPUT,"session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
-        description: 'Record tool call to Operad graph (pre-execution)',
-      },
-    ],
-    PostToolUse: [
-      {
-        command: `echo '{"hook_type":"PostToolUse","tool_name":"$TOOL_NAME","tool_input":$TOOL_INPUT,"session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
-        description: 'Record tool result and show progress hints',
-      },
-    ],
-    Notification: [
-      {
-        command: 'node node_modules/@operad/session/dist/hook.js',
-        description: 'Record user goals (messages) to Operad graph',
-      },
-    ],
-    Stop: [
-      {
-        command: `echo '{"hook_type":"Stop","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
-        description: 'Print session summary: tools, reads, writes, waste, next steps',
-      },
-    ],
-    SessionEnd: [
-      {
-        command: `echo '{"hook_type":"SessionEnd","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
-        description: 'Final cleanup and session end marker',
-      },
-    ],
+  // Validate --harness flag if provided
+  if (targetHarness && !validHarnesses.includes(targetHarness as HarnessType)) {
+    console.error(`${c.red}Error:${c.reset} Unknown harness: ${targetHarness}`)
+    console.error(`  Valid options: ${validHarnesses.join(', ')}`)
+    process.exit(1)
   }
 
-  // Read existing settings or create new
-  let settings: Record<string, unknown> = {}
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-    } catch {
-      // Corrupted settings — start fresh
-    }
+  // Install hooks — either for a specific harness or ALL of them
+  const { installClaudeHooks, installCodexHooks, installOpenCodePlugin } = await import('./harness.js')
+
+  let results: Awaited<ReturnType<typeof installClaudeHooks>>[]
+
+  if (targetHarness) {
+    // Specific harness requested
+    results = [installHooks({ harness: targetHarness as HarnessType, cwd })[0]]
+  } else {
+    // Default: install for ALL agents. If you run `init`, you want everything tracked.
+    results = [
+      installClaudeHooks(cwd),
+      installCodexHooks(cwd),
+      installOpenCodePlugin(cwd),
+    ]
   }
 
-  // Merge hooks (don't overwrite existing non-Operad hooks)
-  const existingHooks = (settings.hooks ?? {}) as Record<string, unknown[]>
-  for (const [event, hooks] of Object.entries(operadHooks)) {
-    const existing = existingHooks[event] ?? []
-    // Remove any previous Operad hooks (by checking for operad-session in command)
-    const nonOperad = (existing as Array<{ command?: string }>).filter(
-      (h) => !h.command?.includes('operad-session')
-    )
-    existingHooks[event] = [...nonOperad, ...hooks]
+  const names: Record<string, string> = {
+    claude: 'Claude Code',
+    codex: 'Codex CLI',
+    opencode: 'OpenCode',
   }
-  settings.hooks = existingHooks
 
-  // Write
-  mkdirSync(settingsDir, { recursive: true })
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+  console.log(`${c.bold}Configuring session tracking for local coding agents...${c.reset}`)
+  console.log()
 
-  console.log(`${c.green}✓${c.reset} Operad hooks installed in ${c.cyan}.claude/settings.json${c.reset}`)
+  for (const result of results) {
+    console.log(`${c.green}✓${c.reset} ${c.bold}${names[result.harness]}${c.reset} — ${result.message}`)
+  }
+
   console.log()
   console.log(`  ${c.bold}What happens now:${c.reset}`)
-  console.log(`    ${c.green}•${c.reset} Every Claude Code session is tracked automatically`)
+  console.log(`    ${c.green}•${c.reset} Every Claude, Codex, and OpenCode session is tracked`)
   console.log(`    ${c.green}•${c.reset} Session start/end summaries appear in your terminal`)
   console.log(`    ${c.green}•${c.reset} Data stored in ${c.dim}~/.operad/session.db${c.reset}`)
   console.log()
@@ -1299,6 +1462,8 @@ async function cmdInit(): Promise<void> {
   console.log(`    ${c.dim}operad-session inspect --graph <session-id>${c.reset}`)
   console.log(`    ${c.dim}operad-session blame --graph <session-id>${c.reset}`)
   console.log(`    ${c.dim}operad-session view --graph <session-id>${c.reset}`)
+  console.log()
+  console.log(`  ${c.dim}Disable: remove operad hooks from .claude/ .codex/ or .opencode/${c.reset}`)
 }
 
 // ─── Stash Helpers ──────────────────────────────────────────────────────────
@@ -1353,6 +1518,48 @@ function buildFileReadBreakdown(events: GraphEvent[]): FileReadInfo[] {
   }))
 }
 
+// ─── Redundant Read Detection ───────────────────────────────────────────────
+
+/**
+ * Detect which event indices are redundant reads (same file, no edit in between).
+ * Returns a Set of event indices that are redundant.
+ */
+function detectRedundantReads(events: GraphEvent[]): Set<number> {
+  const redundantIndices = new Set<number>()
+  const lastReadIndex = new Map<string, number>() // filePath → event index
+  const lastEditIndex = new Map<string, number>() // filePath → event index
+
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]
+    if (event.type !== 'custom.tool_called') continue
+
+    const tool = event.payload.tool as string
+    const input = event.payload.input as Record<string, unknown> | undefined
+
+    if (tool === 'Edit' || tool === 'Write') {
+      const filePath = (input?.file_path as string) ?? ''
+      if (filePath) lastEditIndex.set(filePath, i)
+      continue
+    }
+
+    if (tool === 'Read') {
+      const filePath = (input?.file_path as string) ?? ''
+      if (!filePath) continue
+
+      const prevRead = lastReadIndex.get(filePath)
+      const lastEdit = lastEditIndex.get(filePath) ?? -1
+
+      if (prevRead !== undefined && lastEdit <= prevRead) {
+        redundantIndices.add(i)
+      }
+
+      lastReadIndex.set(filePath, i)
+    }
+  }
+
+  return redundantIndices
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const HELP = `
@@ -1362,11 +1569,12 @@ ${c.bold}USAGE${c.reset}
   operad-session <command> [options]
 
 ${c.bold}COMMANDS${c.reset}
-  ${c.green}init${c.reset}                         Set up Claude Code hooks (auto-tracking)
+  ${c.green}init${c.reset} [--harness <type>]        Set up hooks for coding agents (auto-detects)
+                                 Supported: claude, codex, opencode
   ${c.green}commit${c.reset} <path.jsonl>          Import JSONL into the persistent graph
   ${c.green}inspect${c.reset} --graph <id>          Show run summary (events, goals, cost, tail)
   ${c.green}inspect${c.reset} --graph <id> --event <evt>  Show full payload for one event
-  ${c.green}graph${c.reset} --graph <id>            Show ASCII event graph (turn-based view)
+  ${c.green}graph${c.reset} --graph <id>            Show goal traces (default) or event stream (--stream)
   ${c.green}log${c.reset} --graph <id>             Show event history (like git log)
   ${c.green}blame${c.reset} --graph <id>           Show cost per goal (which goal spent how much)
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
@@ -1379,7 +1587,7 @@ ${c.bold}COMMANDS${c.reset}
   ${c.green}export-trace${c.reset} --graph <id>     Export trace as JSONL or text
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
-  ${c.green}view${c.reset} --graph <id>            Open interactive timeline in browser
+  ${c.green}view${c.reset} --graph <id>            Open tabbed session viewer in browser (--classic for old tree view)
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
 
 ${c.bold}GLOBAL OPTIONS${c.reset}
@@ -1391,8 +1599,12 @@ ${c.bold}STORAGE${c.reset}
   All data is persisted to: ${c.dim}${DB_PATH}${c.reset}
 
 ${c.bold}EXAMPLES${c.reset}
-  ${c.dim}# Enable auto-tracking (one-time setup)${c.reset}
+  ${c.dim}# Enable auto-tracking (auto-detects your coding agent)${c.reset}
   operad-session init
+
+  ${c.dim}# Target a specific agent${c.reset}
+  operad-session init --harness codex
+  operad-session init --harness opencode
 
   ${c.dim}# Import a Claude Code session${c.reset}
   operad-session commit ~/.claude/projects/myapp/session.jsonl
@@ -1451,7 +1663,7 @@ async function main() {
 
   switch (command) {
     case 'init':
-      await cmdInit()
+      await cmdInit(flags)
       break
     case 'commit':
       await cmdCommit(positional, flags)

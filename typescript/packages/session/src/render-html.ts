@@ -7,7 +7,7 @@
  *
  * Pure function — no I/O. Caller writes the file and opens the browser.
  */
-import type { RenderableObject, RenderableRelation } from '@operad/core'
+import type { RenderableObject, RenderableRelation, GraphEvent } from '@operad/core'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -896,4 +896,792 @@ function buildHtml(
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// ─── Session HTML Renderer (Tabbed: Event Stream + Goal Traces) ─────────────
+
+export interface RenderSessionOptions {
+  title?: string
+  branch?: BranchInfo
+}
+
+/**
+ * Render raw events into a tabbed HTML view.
+ * Tab 1: Event Stream (chronological, color-coded, with redundant markers)
+ * Tab 2: Goal Traces (per-goal cards with summaries)
+ */
+export function renderSessionHtml(
+  events: GraphEvent[],
+  options?: RenderSessionOptions,
+): string {
+  const title = options?.title ?? 'Operad Session'
+
+  // ── Pre-compute data ──────────────────────────────────────────────────
+
+  // Build turns (goals)
+  interface Turn { goalText: string; goalTimestamp: string; events: GraphEvent[] }
+  const turns: Turn[] = []
+  let current: Turn | null = null
+  for (const e of events) {
+    if (e.type === 'goal.set') {
+      if (current) turns.push(current)
+      current = { goalText: (e.payload.text as string) ?? '', goalTimestamp: e.timestamp, events: [] }
+    } else if (current) {
+      current.events.push(e)
+    }
+  }
+  if (current) turns.push(current)
+
+  // Detect redundant reads
+  const redundantIndices = new Set<number>()
+  const lastReadIdx = new Map<string, number>()
+  const lastEditIdx = new Map<string, number>()
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i]
+    if (ev.type !== 'custom.tool_called') continue
+    const tool = ev.payload.tool as string
+    const input = ev.payload.input as Record<string, unknown> | undefined
+    if (tool === 'Edit' || tool === 'Write') {
+      const fp = (input?.file_path as string) ?? ''
+      if (fp) lastEditIdx.set(fp, i)
+    } else if (tool === 'Read') {
+      const fp = (input?.file_path as string) ?? ''
+      if (!fp) continue
+      const prev = lastReadIdx.get(fp)
+      const le = lastEditIdx.get(fp) ?? -1
+      if (prev !== undefined && le <= prev) redundantIndices.add(i)
+      lastReadIdx.set(fp, i)
+    }
+  }
+
+  // Stats
+  const goalEvents = events.filter(e => e.type === 'goal.set')
+  const toolEvents = events.filter(e => e.type === 'custom.tool_called')
+  const blameEvents = events.filter(e => e.type === 'custom.blame_recorded')
+  const totalCost = blameEvents.reduce((s, e) => s + ((e.payload.cost as number) ?? 0), 0)
+
+  // Filter events for stream view (skip internal noise)
+  const internalTypes = new Set(['custom.blame_recorded', 'custom.assistant_responded', 'custom.reasoning_trace'])
+  const streamEvents = events
+    .map((e, i) => ({ event: e, idx: i }))
+    .filter(({ event }) => !internalTypes.has(event.type))
+
+  // ── Build event stream rows ───────────────────────────────────────────
+  const streamRowsHtml = streamEvents.map(({ event, idx }) => {
+    const rawType = event.type.replace(/^custom\./, '')
+    const ts = new Date(event.timestamp)
+    const timeStr = `${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}:${String(ts.getSeconds()).padStart(2, '0')}`
+
+    let cssClass = 'ev-default'
+    let icon = '·'
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      cssClass = 'ev-goal'; icon = '●'
+    } else if (rawType === 'tool_called') {
+      const tool = (event.payload.tool as string) ?? ''
+      if (['Read', 'Grep', 'Glob'].includes(tool)) { cssClass = 'ev-read'; icon = '○' }
+      else if (['Edit', 'Write'].includes(tool)) { cssClass = 'ev-write'; icon = '◆' }
+      else if (tool === 'Bash') { cssClass = 'ev-bash'; icon = '◆' }
+      else { cssClass = 'ev-tool'; icon = '○' }
+    } else if (rawType.startsWith('object.') || rawType.startsWith('relation.')) {
+      cssClass = 'ev-projection'; icon = '◇'
+    }
+
+    const isRedundant = redundantIndices.has(idx)
+    if (isRedundant) cssClass = 'ev-redundant'
+
+    // Detail
+    let detail = ''
+    const p = event.payload
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      const text = (p.text as string) ?? (p.goal as string) ?? ''
+      detail = `"${escapeHtml(text.replace(/\n/g, ' ').slice(0, 80))}"`
+    } else if (rawType === 'tool_called') {
+      const tool = (p.tool as string) ?? '?'
+      const input = p.input as Record<string, unknown> | undefined
+      const filePath = (p.file_path as string) ?? (input?.file_path as string) ?? ''
+      const shortFile = filePath ? filePath.split('/').slice(-2).join('/') : ''
+      detail = `<strong>${escapeHtml(tool)}</strong>${shortFile ? ` <span class="ev-file">${escapeHtml(shortFile)}</span>` : ''}`
+      if (isRedundant) detail += ' <span class="redundant-tag">← redundant</span>'
+    }
+
+    // Find which goal this event belongs to (for cross-linking)
+    let goalIdx = -1
+    for (let g = turns.length - 1; g >= 0; g--) {
+      const goalTs = turns[g].goalTimestamp
+      if (event.timestamp >= goalTs) { goalIdx = g; break }
+    }
+
+    const tooltip = escapeHtml(JSON.stringify(event.payload, null, 2).slice(0, 500))
+
+    return `<div class="ev-row ${cssClass}" data-goal-idx="${goalIdx}" data-idx="${idx}" title="${tooltip}"><span class="ev-time">${timeStr}</span><span class="ev-icon">${icon}</span><span class="ev-type">${escapeHtml(rawType)}</span><span class="ev-detail">${detail}</span></div>`
+  }).join('\n')
+
+  // ── Project events → objects/relations (inline, no database) ─────────
+  const TEST_CMDS = ['test', 'pytest', 'vitest', 'jest', 'npm test', 'pnpm test', 'npx vitest']
+  function isTestCmd(cmd: string) {
+    // Only check the first line / actual command, not heredoc bodies or string args
+    const firstLine = cmd.split('\n')[0].toLowerCase().trim()
+    return TEST_CMDS.some(tc => firstLine.startsWith(tc) || firstLine.includes(` ${tc}`))
+  }
+
+  interface PNode { id: string; type: string; label: string; tooltip: string }
+  interface PEdge { targetId: string; edgeLabel: string }
+
+  const goalChildrenMap: Record<string, PEdge[]> = {}
+  const nodeDataMap: Record<string, PNode> = {}
+  const projGoals: Array<{ id: string; text: string; ts: string; childCount: number }> = []
+  const fileObjIds = new Map<string, string>()
+  let activeGoalId: string | null = null
+  let nodeCounter = 0
+
+  function mkId() { return `n_${nodeCounter++}` }
+
+  for (const event of events) {
+    if (event.type === 'goal.set') {
+      const id = mkId()
+      const text = (event.payload.text as string) ?? ''
+      activeGoalId = id
+      goalChildrenMap[id] = []
+      nodeDataMap[id] = { id, type: 'goal', label: text.length > 60 ? text.slice(0, 57) + '...' : text, tooltip: `Goal: ${text}` }
+      projGoals.push({ id, text, ts: event.timestamp, childCount: 0 })
+    } else if (event.type === 'custom.tool_called') {
+      const tool = event.payload.tool as string
+      const input = event.payload.input as Record<string, unknown> | undefined
+
+      if (tool === 'Read' || tool === 'Glob' || tool === 'Grep') {
+        const fp = (input?.file_path as string) ?? (input?.path as string) ?? (input?.pattern as string) ?? ''
+        if (fp && !fileObjIds.has(fp)) {
+          const id = mkId()
+          fileObjIds.set(fp, id)
+          const shortPath = fp.split('/').slice(-3).join('/')
+          nodeDataMap[id] = { id, type: 'file', label: shortPath, tooltip: `File: ${fp}\nRead count: 1` }
+          if (activeGoalId) {
+            goalChildrenMap[activeGoalId].push({ targetId: id, edgeLabel: 'triggered' })
+            const g = projGoals.find(g => g.id === activeGoalId)
+            if (g) g.childCount++
+          }
+        }
+      }
+
+      if (tool === 'Edit' || tool === 'Write') {
+        const fp = (input?.file_path as string) ?? ''
+        const id = mkId()
+        const shortPath = fp ? fp.split('/').slice(-3).join('/') : tool
+        const oldStr = tool === 'Edit' ? ((input?.old_string as string) ?? '').slice(0, 80) : ''
+        const newStr = tool === 'Edit' ? ((input?.new_string as string) ?? '').slice(0, 80) : ''
+        nodeDataMap[id] = { id, type: 'patch', label: shortPath, tooltip: `${tool}: ${fp}${oldStr ? `\n- ${oldStr}\n+ ${newStr}` : ''}` }
+        if (activeGoalId) {
+          goalChildrenMap[activeGoalId].push({ targetId: id, edgeLabel: 'produced' })
+          const g = projGoals.find(g => g.id === activeGoalId)
+          if (g) g.childCount++
+        }
+        // Ensure file node exists
+        if (fp && !fileObjIds.has(fp)) {
+          const fid = mkId()
+          fileObjIds.set(fp, fid)
+          nodeDataMap[fid] = { id: fid, type: 'file', label: fp.split('/').slice(-3).join('/'), tooltip: `File: ${fp}` }
+        }
+      }
+
+      if (tool === 'Bash') {
+        const command = (input?.command as string) ?? ''
+        if (isTestCmd(command)) {
+          const id = mkId()
+          nodeDataMap[id] = { id, type: 'test_run', label: command.slice(0, 50), tooltip: `Test: ${command.slice(0, 200)}` }
+          if (activeGoalId) {
+            goalChildrenMap[activeGoalId].push({ targetId: id, edgeLabel: 'verified_by' })
+            const g = projGoals.find(g => g.id === activeGoalId)
+            if (g) g.childCount++
+          }
+        }
+      }
+    }
+  }
+
+  // Goal list HTML for the left panel
+  const goalListHtml = projGoals.map((g, i) => {
+    const text = escapeHtml(g.text.replace(/\n/g, ' ').slice(0, 60))
+    const countBadge = g.childCount > 0 ? `<span class="child-count">${g.childCount}</span>` : ''
+    const ts = formatTimestamp(g.ts)
+    const timeBadge = ts ? `<span class="goal-time">${ts}</span>` : ''
+    return `<div class="gt-goal-item" data-id="${g.id}" data-index="${i}"><span class="gt-goal-num">#${i + 1}</span><span class="gt-goal-icon">★</span><span class="gt-goal-mid"><span class="gt-goal-text">${text}</span>${timeBadge}</span>${countBadge}</div>`
+  }).join('\n')
+
+  // Stats for goal traces tab
+  const projFiles = new Set(fileObjIds.keys()).size
+  const projPatches = Object.values(nodeDataMap).filter(n => n.type === 'patch').length
+  const projTests = Object.values(nodeDataMap).filter(n => n.type === 'test_run').length
+
+  // ── Assemble HTML ─────────────────────────────────────────────────────
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e; color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ── Toolbar ────────────────────────────────── */
+  .toolbar {
+    height: 44px; background: #12122a; border-bottom: 1px solid #2a2a4a;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 16px; flex-shrink: 0;
+  }
+  .toolbar-left { display: flex; align-items: center; gap: 12px; }
+  .toolbar-right { display: flex; align-items: center; gap: 8px; }
+  .brand { font-size: 12px; color: #555; text-decoration: none; transition: color 0.15s; }
+  .brand:hover { color: #88aaff; }
+  .brand span { color: #88aaff; font-weight: 600; }
+  .session-info { font-size: 12px; color: #666; }
+  .session-info .val { color: #ccc; font-weight: 600; }
+  .tb-btn {
+    background: transparent; border: 1px solid #333;
+    color: #aaa; padding: 4px 12px; border-radius: 4px;
+    cursor: pointer; font-size: 12px; transition: all 0.15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .tb-btn:hover { border-color: #555; color: #fff; background: #1e1e3a; }
+
+  /* ── Tabs ────────────────────────────────────── */
+  .tab-bar {
+    display: flex; background: #12122a; border-bottom: 1px solid #2a2a4a;
+    flex-shrink: 0; padding: 0 16px;
+  }
+  .tab {
+    padding: 10px 20px; font-size: 13px; color: #666;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.15s; user-select: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tab:hover { color: #aaa; }
+  .tab.active { color: #88aaff; border-bottom-color: #2B5CE6; }
+  .tab .tab-count {
+    font-size: 10px; background: #2a2a4a; color: #888;
+    padding: 1px 6px; border-radius: 8px;
+  }
+  .tab.active .tab-count { background: #1a3a6a; color: #88aaff; }
+
+  /* ── Tab Panels ─────────────────────────────── */
+  .tab-panel { flex: 1; overflow: hidden; display: none; }
+  .tab-panel.active { display: flex; }
+
+  /* ── Event Stream (Tab 1) ───────────────────── */
+  #panel-stream { flex-direction: column; overflow-y: auto; }
+  #panel-stream::-webkit-scrollbar { width: 6px; }
+  #panel-stream::-webkit-scrollbar-track { background: transparent; }
+  #panel-stream::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  .ev-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 20px; font-size: 13px;
+    border-bottom: 1px solid #1e1e38;
+    cursor: pointer; transition: background 0.1s;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    flex-shrink: 0;
+  }
+  .ev-row:hover { background: #1e1e3a; }
+  .ev-row.highlighted { background: #1a2a4a; border-left: 3px solid #2B5CE6; }
+  .ev-time { color: #555; font-size: 11px; min-width: 60px; font-variant-numeric: tabular-nums; }
+  .ev-icon { min-width: 14px; text-align: center; }
+  .ev-type { min-width: 160px; font-size: 12px; }
+  .ev-detail { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev-file { color: #888; }
+  .ev-detail strong { font-weight: 600; }
+
+  .ev-goal { color: #4ade80; }
+  .ev-goal .ev-icon { color: #4ade80; }
+  .ev-read { color: #aaa; }
+  .ev-read .ev-icon { color: #2EA043; }
+  .ev-write { color: #e0e0e0; }
+  .ev-write .ev-icon { color: #E07020; }
+  .ev-bash { color: #d0d0e0; }
+  .ev-bash .ev-icon { color: #8B5CF6; }
+  .ev-tool { color: #b0b0d0; }
+  .ev-tool .ev-icon { color: #60a5fa; }
+  .ev-projection { color: #888; }
+  .ev-projection .ev-icon { color: #666; }
+  .ev-default { color: #777; }
+  .ev-redundant { color: #777; }
+  .ev-redundant .ev-icon { color: #EF4444; }
+  .ev-redundant .ev-detail { color: #999; }
+  .redundant-tag { color: #EF4444; font-size: 11px; font-weight: 600; margin-left: 6px; }
+
+  /* ── Goal Traces (Tab 2) — Split Panel ──────── */
+  #panel-goals { flex-direction: row; }
+
+  /* Left: goal list */
+  .gt-left {
+    width: 30%; min-width: 280px; max-width: 400px;
+    border-right: 1px solid #2a2a4a;
+    display: flex; flex-direction: column;
+    background: #16162b;
+  }
+  .gt-panel-header {
+    padding: 14px 16px 10px; border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
+  }
+  .gt-panel-header h2 { font-size: 14px; color: #88aaff; margin-bottom: 4px; font-weight: 600; }
+  .gt-panel-header .gt-stats { font-size: 12px; color: #888; }
+  .gt-panel-header .gt-stats .val { color: #ccc; font-weight: 600; }
+
+  .gt-goal-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .gt-goal-list::-webkit-scrollbar { width: 6px; }
+  .gt-goal-list::-webkit-scrollbar-track { background: transparent; }
+  .gt-goal-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  .gt-goal-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; margin: 2px 0;
+    border-radius: 6px; cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease; font-size: 13px;
+  }
+  .gt-goal-item:hover { background: #1e1e3a; border-color: #333; }
+  .gt-goal-item.active { background: #1a2a4a; border-color: #2B5CE6; box-shadow: 0 0 0 1px rgba(43,92,230,0.3); }
+  .gt-goal-num { color: #555; font-size: 11px; min-width: 24px; font-variant-numeric: tabular-nums; }
+  .gt-goal-icon { color: #2B5CE6; flex-shrink: 0; }
+  .gt-goal-mid { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+  .gt-goal-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ddd; }
+  .gt-goal-time { font-size: 10px; color: #555; font-family: 'SF Mono', Monaco, monospace; font-variant-numeric: tabular-nums; }
+  .child-count {
+    background: #2a2a4a; color: #888; font-size: 11px;
+    padding: 1px 6px; border-radius: 10px; flex-shrink: 0;
+  }
+
+  /* Right: tree */
+  .gt-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .gt-tree-header {
+    padding: 14px 24px 10px; border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
+  }
+  .gt-tree-header h2 {
+    font-size: 15px; color: #fff; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .gt-tree-header .gt-tree-stats { font-size: 12px; color: #666; margin-top: 4px; }
+
+  .gt-tree-content { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .gt-tree-content::-webkit-scrollbar { width: 6px; }
+  .gt-tree-content::-webkit-scrollbar-track { background: transparent; }
+  .gt-tree-content::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+  .gt-tree-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: #555; font-size: 14px;
+  }
+
+  .gt-tree-children { margin-left: 20px; padding-left: 16px; border-left: 1px solid #2a2a4a; }
+  .gt-tree-node {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; margin: 4px 0;
+    border-radius: 6px; transition: background 0.1s;
+  }
+  .gt-tree-node:hover { background: rgba(255,255,255,0.03); }
+  .gt-tree-node .node-icon { flex-shrink: 0; font-size: 14px; }
+  .gt-tree-node .node-label {
+    flex: 1; font-size: 13px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gt-tree-node .edge-label {
+    font-size: 11px; color: #666; padding: 2px 8px;
+    background: #1a1a2e; border-radius: 4px; flex-shrink: 0;
+  }
+
+  .gt-tree-node[data-type="file"] .node-label { color: #4ade80; }
+  .gt-tree-node[data-type="patch"] .node-label { color: #fb923c; }
+  .gt-tree-node[data-type="test_run"] .node-label { color: #a78bfa; }
+
+  /* Tooltip */
+  .tooltip {
+    display: none; position: fixed;
+    background: #0d0d1a; border: 1px solid #333;
+    border-radius: 6px; padding: 10px 12px;
+    font-size: 11px; max-width: 400px; z-index: 100;
+    white-space: pre-wrap; word-break: break-all;
+    color: #aaa; line-height: 1.5;
+    pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+
+  /* ── Replay Scrubber ────────────────────────── */
+  .replay-bar {
+    display: none; height: 36px; background: #12122a;
+    border-bottom: 1px solid #2a2a4a;
+    align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0;
+  }
+  .replay-bar.visible { display: flex; }
+  .replay-bar input[type="range"] { flex: 1; accent-color: #2B5CE6; cursor: pointer; }
+  .replay-label { font-size: 11px; color: #666; min-width: 80px; font-variant-numeric: tabular-nums; }
+  .replay-speed {
+    font-size: 11px; color: #555; padding: 2px 6px;
+    border: 1px solid #333; border-radius: 3px; cursor: pointer; background: transparent;
+  }
+  .replay-speed:hover { color: #aaa; border-color: #555; }
+
+  /* ── Toast ──────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 20px; left: 50%;
+    transform: translateX(-50%) translateY(60px);
+    background: #2B5CE6; color: #fff;
+    padding: 8px 20px; border-radius: 6px;
+    font-size: 13px; opacity: 0;
+    transition: all 0.3s ease; z-index: 200; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Legend ──────────────────────────────────── */
+  .legend {
+    padding: 8px 16px; border-top: 1px solid #2a2a4a;
+    display: flex; gap: 14px; flex-wrap: wrap;
+    font-size: 11px; color: #666; flex-shrink: 0;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+  @media (max-width: 768px) {
+    .ev-type { min-width: 100px; }
+    .session-info { display: none; }
+    .ev-row { padding: 5px 10px; gap: 6px; }
+    #panel-goals { flex-direction: column; }
+    .gt-left { width: 100%; max-width: none; height: 40%; min-width: auto; border-right: none; border-bottom: 1px solid #2a2a4a; }
+    .gt-right { height: 60%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div class="toolbar-left">
+    <a class="brand" href="https://github.com/operadhq/operad" target="_blank" rel="noopener"><span>operad</span> session</a>
+    <span class="session-info">
+      <span class="val">${goalEvents.length}</span> goals ·
+      <span class="val">${toolEvents.length}</span> tools ·
+      <span class="val">${events.length}</span> events ·
+      $<span class="val">${totalCost.toFixed(2)}</span>
+      ${redundantIndices.size > 0 ? ` · <span style="color:#EF4444">${redundantIndices.size} redundant</span>` : ''}
+    </span>
+  </div>
+  <div class="toolbar-right">
+    <button class="tb-btn" id="btn-replay" title="Replay events chronologically">▶ Replay</button>
+    <button class="tb-btn" id="btn-download" title="Download this HTML file">↓ Save</button>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tab-bar">
+  <div class="tab active" data-tab="stream">
+    Event Stream <span class="tab-count">${streamEvents.length}</span>
+  </div>
+  <div class="tab" data-tab="goals">
+    Goal Traces <span class="tab-count">${projGoals.length}</span>
+  </div>
+</div>
+
+<!-- Replay bar -->
+<div class="replay-bar" id="replay-bar">
+  <button class="tb-btn" id="btn-replay-toggle" style="padding:4px 8px" title="Play / Pause">▶</button>
+  <input type="range" id="replay-scrubber" min="0" max="${Math.max(0, streamEvents.length - 1)}" value="0">
+  <span class="replay-label" id="replay-label">1 / ${streamEvents.length}</span>
+  <button class="replay-speed" id="replay-speed" title="Playback speed">1×</button>
+</div>
+
+<!-- Event Stream Panel (Tab 1) -->
+<div class="tab-panel active" id="panel-stream">
+  ${streamRowsHtml}
+</div>
+
+<!-- Goal Traces Panel (Tab 2) — Split: goal list + tree -->
+<div class="tab-panel" id="panel-goals">
+  <div class="gt-left">
+    <div class="gt-panel-header">
+      <h2>Goals</h2>
+      <div class="gt-stats">
+        <span class="val">${projGoals.length}</span> goals ·
+        <span class="val">${projFiles}</span> files ·
+        <span class="val">${projPatches}</span> patches ·
+        <span class="val">${projTests}</span> tests
+      </div>
+    </div>
+    <div class="gt-goal-list" id="gt-goal-list">
+      ${goalListHtml}
+    </div>
+  </div>
+  <div class="gt-right">
+    <div class="gt-tree-header">
+      <h2 id="gt-tree-title">Select a goal</h2>
+      <div class="gt-tree-stats" id="gt-tree-stats"></div>
+    </div>
+    <div class="gt-tree-content" id="gt-tree-content">
+      <div class="gt-tree-empty">← Click a goal to view its dependency tree</div>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div> Goal / File</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#E07020"></div> Edit/Write</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8B5CF6"></div> Bash / Test</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#EF4444"></div> Redundant</div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  var totalEvents = ${streamEvents.length};
+  var goalChildren = ${JSON.stringify(goalChildrenMap)};
+  var nodeData = ${JSON.stringify(nodeDataMap)};
+  var icons = { goal: '★', file: '📄', patch: '✏️', test_run: '🧪' };
+
+  // ── Tab switching ─────────────────────────────
+  var tabs = document.querySelectorAll('.tab');
+
+  function switchTab(tabName) {
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === tabName);
+    }
+    document.getElementById('panel-stream').classList.toggle('active', tabName === 'stream');
+    document.getElementById('panel-goals').classList.toggle('active', tabName === 'goals');
+    // Hide replay bar when leaving stream tab
+    if (tabName !== 'stream' && replayActive) {
+      replayBar.classList.remove('visible');
+    } else if (tabName === 'stream' && replayActive) {
+      replayBar.classList.add('visible');
+    }
+  }
+
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].addEventListener('click', function() {
+      switchTab(this.getAttribute('data-tab'));
+    });
+  }
+
+  // ── Toast ─────────────────────────────────────
+  var toast = document.getElementById('toast');
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(function() { toast.classList.remove('show'); }, 2000);
+  }
+
+  // ── Goal Traces: select goal → show tree ──────
+  var gtGoalItems = document.querySelectorAll('.gt-goal-item');
+  var gtTreeTitle = document.getElementById('gt-tree-title');
+  var gtTreeStats = document.getElementById('gt-tree-stats');
+  var gtTreeContent = document.getElementById('gt-tree-content');
+  var selectedGoalId = null;
+
+  function selectGoal(goalId) {
+    selectedGoalId = goalId;
+    for (var i = 0; i < gtGoalItems.length; i++) {
+      gtGoalItems[i].classList.toggle('active', gtGoalItems[i].getAttribute('data-id') === goalId);
+    }
+
+    var node = nodeData[goalId];
+    if (!node) return;
+
+    gtTreeTitle.innerHTML = '<span style="color:#2B5CE6">★</span> ' + escapeHtml(node.label);
+    var children = goalChildren[goalId] || [];
+
+    var counts = { file: 0, patch: 0, test_run: 0 };
+    for (var j = 0; j < children.length; j++) {
+      var child = nodeData[children[j].targetId];
+      if (child && counts[child.type] !== undefined) counts[child.type]++;
+    }
+
+    var statParts = [];
+    if (counts.file > 0) statParts.push(counts.file + ' file' + (counts.file > 1 ? 's' : ''));
+    if (counts.patch > 0) statParts.push(counts.patch + ' patch' + (counts.patch > 1 ? 'es' : ''));
+    if (counts.test_run > 0) statParts.push(counts.test_run + ' test' + (counts.test_run > 1 ? 's' : ''));
+    gtTreeStats.textContent = statParts.length > 0 ? statParts.join(' · ') : 'No children';
+
+    if (children.length === 0) {
+      gtTreeContent.innerHTML = '<div class="gt-tree-empty">This goal has no connected nodes</div>';
+      return;
+    }
+
+    var html = '<div class="gt-tree-children">';
+    for (var j = 0; j < children.length; j++) {
+      var edge = children[j];
+      var child = nodeData[edge.targetId];
+      if (!child) continue;
+      var icon = icons[child.type] || '●';
+      html += '<div class="gt-tree-node" data-type="' + child.type + '" data-id="' + child.id + '" title="' + escapeHtml(child.tooltip) + '">';
+      html += '<span class="edge-label">' + escapeHtml(edge.edgeLabel) + '</span>';
+      html += '<span class="node-icon">' + icon + '</span>';
+      html += '<span class="node-label">' + escapeHtml(child.label) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+    gtTreeContent.innerHTML = html;
+  }
+
+  document.getElementById('gt-goal-list').addEventListener('click', function(e) {
+    var item = e.target.closest('.gt-goal-item');
+    if (item) selectGoal(item.getAttribute('data-id'));
+  });
+
+  // Auto-select first goal
+  if (gtGoalItems.length > 0) {
+    selectGoal(gtGoalItems[0].getAttribute('data-id'));
+  }
+
+  // ── Goal Traces: tooltip on tree nodes ────────
+  var tooltip = document.getElementById('tooltip');
+  gtTreeContent.addEventListener('mouseover', function(e) {
+    var node = e.target.closest('.gt-tree-node');
+    if (!node) { tooltip.style.display = 'none'; return; }
+    var title = node.getAttribute('title');
+    if (!title) { tooltip.style.display = 'none'; return; }
+    tooltip.textContent = title;
+    tooltip.style.display = 'block';
+  });
+  gtTreeContent.addEventListener('mousemove', function(e) {
+    if (tooltip.style.display === 'block') {
+      tooltip.style.left = (e.clientX + 12) + 'px';
+      tooltip.style.top = (e.clientY + 12) + 'px';
+    }
+  });
+  gtTreeContent.addEventListener('mouseout', function(e) {
+    if (!e.target.closest('.gt-tree-node')) tooltip.style.display = 'none';
+  });
+
+  // ── Goal Traces: keyboard nav ─────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.key === '1') switchTab('stream');
+    else if (e.key === '2') switchTab('goals');
+    else if (e.key === ' ' && replayActive) {
+      e.preventDefault();
+      replayPlaying ? stopReplay() : startReplay();
+    }
+
+    // Arrow keys for goal navigation (only when goals tab active)
+    if (!selectedGoalId) return;
+    var panel = document.getElementById('panel-goals');
+    if (!panel.classList.contains('active')) return;
+
+    var currentIndex = -1;
+    for (var i = 0; i < gtGoalItems.length; i++) {
+      if (gtGoalItems[i].getAttribute('data-id') === selectedGoalId) { currentIndex = i; break; }
+    }
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      if (currentIndex < gtGoalItems.length - 1) {
+        selectGoal(gtGoalItems[currentIndex + 1].getAttribute('data-id'));
+        gtGoalItems[currentIndex + 1].scrollIntoView({ block: 'nearest' });
+      }
+    } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      if (currentIndex > 0) {
+        selectGoal(gtGoalItems[currentIndex - 1].getAttribute('data-id'));
+        gtGoalItems[currentIndex - 1].scrollIntoView({ block: 'nearest' });
+      }
+    }
+  });
+
+  // ── Replay (Event Stream only) ────────────────
+  var evRows = document.querySelectorAll('.ev-row');
+  var replayBar = document.getElementById('replay-bar');
+  var replayBtn = document.getElementById('btn-replay');
+  var replayToggle = document.getElementById('btn-replay-toggle');
+  var scrubber = document.getElementById('replay-scrubber');
+  var replayLabel = document.getElementById('replay-label');
+  var speedBtn = document.getElementById('replay-speed');
+  var replayActive = false;
+  var replayPlaying = false;
+  var replayTimer = null;
+  var replayIndex = 0;
+  var speeds = [1, 2, 4, 0.5];
+  var speedIndex = 0;
+
+  replayBtn.addEventListener('click', function() {
+    replayActive = !replayActive;
+    replayBar.classList.toggle('visible', replayActive);
+    if (replayActive) {
+      switchTab('stream');
+      replayIndex = 0;
+      scrubber.value = 0;
+      updateReplay();
+      showToast('Replay mode — scrub or press play');
+    } else {
+      stopReplay();
+      for (var i = 0; i < evRows.length; i++) {
+        evRows[i].style.display = '';
+        evRows[i].classList.remove('highlighted');
+      }
+    }
+  });
+
+  replayToggle.addEventListener('click', function() {
+    replayPlaying ? stopReplay() : startReplay();
+  });
+
+  scrubber.addEventListener('input', function() {
+    replayIndex = parseInt(this.value);
+    updateReplay();
+  });
+
+  speedBtn.addEventListener('click', function() {
+    speedIndex = (speedIndex + 1) % speeds.length;
+    speedBtn.textContent = speeds[speedIndex] + '×';
+    if (replayPlaying) { stopReplay(); startReplay(); }
+  });
+
+  function updateReplay() {
+    replayLabel.textContent = (replayIndex + 1) + ' / ' + totalEvents;
+    for (var i = 0; i < evRows.length; i++) {
+      evRows[i].style.display = i <= replayIndex ? '' : 'none';
+      evRows[i].classList.toggle('highlighted', i === replayIndex);
+    }
+    if (evRows[replayIndex]) evRows[replayIndex].scrollIntoView({ block: 'nearest' });
+  }
+
+  function startReplay() {
+    replayPlaying = true;
+    replayToggle.textContent = '⏸';
+    advanceReplay();
+  }
+
+  function stopReplay() {
+    replayPlaying = false;
+    replayToggle.textContent = '▶';
+    if (replayTimer) { clearTimeout(replayTimer); replayTimer = null; }
+  }
+
+  function advanceReplay() {
+    if (!replayPlaying || replayIndex >= totalEvents - 1) { stopReplay(); return; }
+    replayIndex++;
+    scrubber.value = replayIndex;
+    updateReplay();
+    replayTimer = setTimeout(advanceReplay, 200 / speeds[speedIndex]);
+  }
+
+  // ── Download ──────────────────────────────────
+  document.getElementById('btn-download').addEventListener('click', function() {
+    var html = '<!DOCTYPE html>' + document.documentElement.outerHTML;
+    var blob = new Blob([html], { type: 'text/html' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'operad-session.html';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Downloaded operad-session.html');
+  });
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+})();
+</script>
+</body>
+</html>`
 }
