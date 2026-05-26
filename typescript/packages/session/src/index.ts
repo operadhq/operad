@@ -44,6 +44,10 @@ export type { FileState, ToolHistoryEntry } from './query.js'
 export { forkForSubagent, detectParentGraph } from './subagent.js'
 export type { ForkResult } from './subagent.js'
 
+// Fork context extraction (for --run and programmatic fork-and-run)
+export { extractForkContext } from './context.js'
+export type { ForkContext } from './context.js'
+
 // Types
 export type {
   JSONLLine,

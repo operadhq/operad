@@ -16,16 +16,18 @@
  *   revert <event-id>           Revert to a point (compensating events)
  *   explore <event-id> -n 3     Fork N branches from a point
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { homedir, tmpdir, platform } from 'node:os'
-import { execSync } from 'node:child_process'
+import { execSync, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createRuntime } from '@operad/core'
 import type { GraphEvent, GraphDiff, RevertResult, ExploreResult } from '@operad/core'
 import { SqliteAdapter } from '@operad/adapter-sqlite'
 import { commit } from './session.js'
 import { detectStash } from './waste.js'
 import { renderHtmlGraph } from './render-html.js'
+import { extractForkContext } from './context.js'
 import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -181,41 +183,100 @@ async function cmdLog(positional: string[], flags: Record<string, string | boole
     return
   }
 
-  // Display like git log
-  console.log(`${c.bold}Event log for graph:${c.reset} ${c.yellow}${graphId}${c.reset}`)
-  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
-  console.log()
-
-  for (const event of events) {
-    const typeColor = event.type.startsWith('custom.goal') ? c.green
-      : event.type.startsWith('custom.tool') ? c.cyan
-      : event.type.startsWith('custom.revert') ? c.red
-      : c.magenta
-
-    const shortId = event.id.slice(0, 12)
-    const ts = formatTimestamp(event.timestamp)
-    const actor = event.actor ? ` ${c.dim}(${event.actor})${c.reset}` : ''
-
-    console.log(`${c.yellow}${shortId}${c.reset} ${typeColor}${event.type}${c.reset}${actor}`)
-    console.log(`${c.dim}  ${ts}${c.reset}`)
-
-    // Show payload highlights
-    if (event.payload.tool) {
-      console.log(`  tool: ${c.bold}${event.payload.tool}${c.reset}`)
-    }
-    if (event.payload.goal) {
-      console.log(`  goal: ${c.green}${event.payload.goal}${c.reset}`)
-    }
-    if (event.payload.file_path) {
-      console.log(`  file: ${event.payload.file_path}`)
-    }
-    if (event.causedBy) {
-      console.log(`  ${c.dim}caused by: ${event.causedBy.slice(0, 12)}${c.reset}`)
-    }
+  // Verbose mode (--verbose): git-log style with full detail
+  if (flags['verbose']) {
+    console.log(`${c.bold}Event log for graph:${c.reset} ${c.yellow}${graphId}${c.reset}`)
+    console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`)
     console.log()
+
+    for (const event of events) {
+      const typeColor = event.type.startsWith('custom.goal') ? c.green
+        : event.type.startsWith('custom.tool') ? c.cyan
+        : event.type.startsWith('custom.revert') ? c.red
+        : c.magenta
+
+      const shortId = event.id.slice(0, 12)
+      const ts = formatTimestamp(event.timestamp)
+      const actor = event.actor ? ` ${c.dim}(${event.actor})${c.reset}` : ''
+
+      console.log(`${c.yellow}${shortId}${c.reset} ${typeColor}${event.type}${c.reset}${actor}`)
+      console.log(`${c.dim}  ${ts}${c.reset}`)
+
+      if (event.payload.tool) {
+        console.log(`  tool: ${c.bold}${event.payload.tool}${c.reset}`)
+      }
+      if (event.payload.goal) {
+        console.log(`  goal: ${c.green}${event.payload.goal}${c.reset}`)
+      }
+      if (event.payload.file_path) {
+        console.log(`  file: ${event.payload.file_path}`)
+      }
+      if (event.causedBy) {
+        console.log(`  ${c.dim}caused by: ${event.causedBy.slice(0, 12)}${c.reset}`)
+      }
+      console.log()
+    }
+
+    console.log(`${c.dim}Total: ${events.length} events${c.reset}`)
+    return
   }
 
+  // Default: compact streaming-style trace (like ActiveGraph)
+  // Filter out internal bookkeeping events that are noise in the trace
+  const internalTypes = new Set([
+    'custom.blame_recorded',
+    'custom.assistant_responded',
+    'custom.reasoning_trace',
+  ])
+  const traceEvents = events.filter((e) => !internalTypes.has(e.type))
+
+  console.log(`${c.bold}${c.yellow}${graphId}${c.reset} ${c.dim}— ${traceEvents.length} events (${events.length} total)${c.reset}`)
+  console.log()
+
+  for (const event of traceEvents) {
+    // Format the event type — strip 'custom.' prefix for readability
+    const rawType = event.type.replace(/^custom\./, '')
+
+    // Color by category
+    const typeColor = rawType === 'goal.set' || rawType === 'goal_started' ? c.green
+      : rawType === 'tool_called' ? c.cyan
+      : rawType === 'blame_recorded' ? c.yellow
+      : rawType.startsWith('object.') || rawType.startsWith('relation.') ? c.magenta
+      : rawType === 'reasoning_trace' || rawType === 'assistant_responded' ? c.blue
+      : rawType.startsWith('revert') ? c.red
+      : c.dim
+
+    // Build the detail string
+    let detail = ''
+    const p = event.payload
+
+    if (rawType === 'goal.set' || rawType === 'goal_started') {
+      const text = (p.text as string) ?? (p.goal as string) ?? ''
+      detail = `  ${c.green}"${text.replace(/\n/g, ' ').slice(0, 70)}"${c.reset}`
+    } else if (rawType === 'tool_called') {
+      const tool = (p.tool as string) ?? '?'
+      const filePath = p.file_path as string | undefined
+      const input = p.input as Record<string, unknown> | undefined
+      const file = filePath ?? (input?.file_path as string | undefined) ?? ''
+      const shortFile = file ? ` → ${file.split('/').slice(-2).join('/')}` : ''
+      detail = `  ${c.bold}${tool}${c.reset}${c.dim}${shortFile}${c.reset}`
+    } else if (rawType.startsWith('object.')) {
+      const objType = p.objectType as string | undefined
+      if (objType) detail = `  ${c.dim}${objType}${c.reset}`
+    }
+
+    const actor = event.actor ?? 'runtime'
+    const actorStr = actor === 'agent' ? `${c.cyan}agent  ${c.reset}`
+      : actor === 'user' ? `${c.green}user   ${c.reset}`
+      : `${c.dim}${actor.padEnd(7)}${c.reset}`
+
+    const typePadded = `[${rawType}]`.padEnd(22)
+    console.log(`  ${typeColor}${typePadded}${c.reset} ${actorStr}${detail}`)
+  }
+
+  console.log()
   console.log(`${c.dim}Total: ${events.length} events${c.reset}`)
+  console.log(`${c.dim}Use --verbose for full detail per event${c.reset}`)
 }
 
 async function cmdBlame(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -721,6 +782,21 @@ async function cmdInspect(positional: string[], flags: Record<string, string | b
   const firstTs = events[0].timestamp
   const lastTs = events[events.length - 1].timestamp
 
+  // Extract model(s) used in the session
+  const models = new Map<string, number>()
+  for (const e of blameEvents) {
+    const model = e.payload.model as string | undefined
+    if (model && model !== 'unknown') {
+      models.set(model, (models.get(model) ?? 0) + 1)
+    }
+  }
+  const modelList = Array.from(models.entries()).sort((a, b) => b[1] - a[1])
+
+  // Extract total tokens
+  const totalInput = blameEvents.reduce((sum, e) => sum + ((e.payload.input_tokens as number) ?? 0), 0)
+  const totalOutput = blameEvents.reduce((sum, e) => sum + ((e.payload.output_tokens as number) ?? 0), 0)
+  const totalCacheRead = blameEvents.reduce((sum, e) => sum + ((e.payload.cache_read_input_tokens as number) ?? 0), 0)
+
   if (flags['json']) {
     console.log(JSON.stringify({
       graphId,
@@ -729,6 +805,8 @@ async function cmdInspect(positional: string[], flags: Record<string, string | b
       goals: goalEvents.length,
       toolCalls: toolEvents.length,
       totalCost,
+      models: Object.fromEntries(models),
+      tokens: { input: totalInput, output: totalOutput, cacheRead: totalCacheRead },
       firstEvent: firstTs,
       lastEvent: lastTs,
       tailEvents: events.slice(-5).map((e) => ({ id: e.id, type: e.type, timestamp: e.timestamp })),
@@ -743,7 +821,15 @@ async function cmdInspect(positional: string[], flags: Record<string, string | b
   console.log(`  ${c.bold}Events:${c.reset}      ${events.length}`)
   console.log(`  ${c.bold}Goals:${c.reset}       ${goalEvents.length}`)
   console.log(`  ${c.bold}Tool calls:${c.reset}  ${toolEvents.length}`)
+  if (modelList.length > 0) {
+    const primary = modelList[0]
+    console.log(`  ${c.bold}Model:${c.reset}       ${c.cyan}${primary[0]}${c.reset} ${c.dim}(${primary[1]} calls)${c.reset}`)
+    for (const [model, count] of modelList.slice(1)) {
+      console.log(`               ${c.cyan}${model}${c.reset} ${c.dim}(${count} calls)${c.reset}`)
+    }
+  }
   console.log(`  ${c.bold}Total cost:${c.reset}  $${totalCost.toFixed(2)}`)
+  console.log(`  ${c.bold}Tokens:${c.reset}      ${formatTokens(totalInput)} in / ${formatTokens(totalOutput)} out / ${formatTokens(totalCacheRead)} cached`)
   console.log(`  ${c.bold}First event:${c.reset} ${formatTimestamp(firstTs)}`)
   console.log(`  ${c.bold}Last event:${c.reset}  ${formatTimestamp(lastTs)}`)
   console.log()
@@ -773,6 +859,10 @@ async function cmdFork(positional: string[], flags: Record<string, string | bool
   }
 
   const label = (flags['label'] as string) ?? 'fork'
+  const runInstruction = flags['run'] as string | undefined
+  const model = (flags['model'] as string) ?? 'claude-sonnet-4'
+  const maxBudget = parseFloat((flags['max-budget'] as string) ?? '5.00')
+  const noDiff = flags['no-diff'] === true
 
   const storage = getStorage()
   const runtime = createRuntime({ storage })
@@ -789,6 +879,100 @@ async function cmdFork(positional: string[], flags: Record<string, string | bool
     process.exit(1)
   }
 
+  console.log(`${c.green}Forked${c.reset} ${c.yellow}${graphId}${c.reset} at event ${c.cyan}${atEvent.slice(0, 12)}${c.reset}`)
+  console.log(`  ${c.bold}Branch:${c.reset} ${c.cyan}${branchGraph.id}${c.reset}`)
+  console.log()
+
+  // ─── --run: Execute Claude CLI on the fork ───────────────────────────────
+  if (runInstruction) {
+    // 1. Extract context from parent graph up to fork point
+    const events = await storage.queryEvents(graphId, {})
+    const { systemPrompt, workingDir } = extractForkContext(events, atEvent)
+
+    // 2. Spawn Claude CLI
+    const sessionId = randomUUID()
+    console.log(`${c.bold}Running Claude${c.reset} (${c.dim}${model}, budget: $${maxBudget.toFixed(2)}${c.reset})`)
+    console.log(`  ${c.bold}Prompt:${c.reset} "${runInstruction}"`)
+    console.log(`  ⏳ Executing...`)
+    console.log()
+
+    const cwd = workingDir ?? process.cwd()
+    const result = spawnSync('claude', [
+      '--print',
+      '--model', model,
+      '--system-prompt', systemPrompt,
+      '--session-id', sessionId,
+      '--output-format', 'text',
+      '--max-turns', '50',
+      '--dangerously-skip-permissions',
+      runInstruction,
+    ], {
+      cwd,
+      env: {
+        ...process.env,
+        OPERAD_GRAPH_ID: branchGraph.id,
+        OPERAD_DB_PATH: DB_PATH,
+      },
+      stdio: ['pipe', 'inherit', 'inherit'],
+      timeout: 300_000, // 5 minute timeout
+    })
+
+    if (result.error) {
+      console.error(`${c.red}Error spawning Claude:${c.reset} ${result.error.message}`)
+      storage.close()
+      process.exit(1)
+    }
+
+    if (result.status !== 0) {
+      console.error(`${c.red}Claude exited with code ${result.status}${c.reset}`)
+    }
+
+    // 3. Find the JSONL file (Claude CLI writes to ~/.claude/projects/<project>/<session-id>.jsonl)
+    const claudeDir = join(homedir(), '.claude', 'projects')
+    const jsonlPath = findJsonlBySessionId(claudeDir, sessionId)
+
+    if (jsonlPath) {
+      // 4. Commit JSONL to the fork graph
+      const jsonlText = readFileSync(jsonlPath, 'utf-8')
+      const sessionLog = await commit(jsonlText, {
+        storage,
+        runtime,
+        graphId: branchGraph.id,
+      })
+
+      console.log()
+      console.log(`  ${c.green}✅ Done${c.reset} — ${sessionLog.toolCalls} tool calls, $${sessionLog.blame.totalCost.toFixed(2)}`)
+      console.log(`  ${c.dim}Committed to fork graph: ${branchGraph.id}${c.reset}`)
+    } else {
+      console.log()
+      console.log(`  ${c.yellow}⚠ No JSONL found${c.reset} for session ${sessionId.slice(0, 8)}...`)
+      console.log(`  ${c.dim}Claude may not have written a session file.${c.reset}`)
+    }
+
+    // 5. Auto-diff parent vs fork
+    if (!noDiff) {
+      console.log()
+      try {
+        const diff = await runtime.diff(graphId, branchGraph.id)
+        const added = diff.objects.filter((o) => o.status === 'added').length +
+          diff.relations.filter((r) => r.status === 'added').length
+        const removed = diff.objects.filter((o) => o.status === 'removed').length +
+          diff.relations.filter((r) => r.status === 'removed').length
+
+        console.log(`${c.bold}Diff:${c.reset} ${c.yellow}${graphId}${c.reset} ↔ ${c.cyan}${branchGraph.id}${c.reset}`)
+        console.log(`  ${c.green}+${added}${c.reset} added, ${c.red}-${removed}${c.reset} removed`)
+        console.log(`  Original: ${diff.sourceLog.length} events | Fork: ${diff.targetLog.length} events`)
+      } catch {
+        // Diff may fail if parent has no divergent events — that's fine
+        console.log(`${c.dim}(diff skipped — no divergent events yet)${c.reset}`)
+      }
+    }
+
+    storage.close()
+    return
+  }
+
+  // ─── Without --run: existing behavior (empty fork) ───────────────────────
   storage.close()
 
   if (flags['json']) {
@@ -801,12 +985,41 @@ async function cmdFork(positional: string[], flags: Record<string, string | bool
     return
   }
 
-  console.log(`${c.green}Forked${c.reset} ${c.yellow}${graphId}${c.reset} at event ${c.cyan}${atEvent.slice(0, 12)}${c.reset}`)
-  console.log()
-  console.log(`  ${c.bold}New graph:${c.reset} ${c.cyan}${branchGraph.id}${c.reset}`)
   console.log(`  ${c.bold}Label:${c.reset}     ${label}`)
   console.log()
   console.log(`${c.dim}Use "operad-session diff ${graphId} ${branchGraph.id}" to compare after making changes.${c.reset}`)
+}
+
+/**
+ * Recursively search for a JSONL file matching a session ID under a directory.
+ * Claude CLI writes session files as: ~/.claude/projects/<project-hash>/<session-id>.jsonl
+ */
+function findJsonlBySessionId(baseDir: string, sessionId: string): string | null {
+  if (!existsSync(baseDir)) return null
+
+  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs')
+  const targetFilename = `${sessionId}.jsonl`
+
+  try {
+    const entries = readdirSync(baseDir)
+    for (const entry of entries) {
+      const fullPath = join(baseDir, entry)
+      const stat = statSync(fullPath)
+      if (stat.isDirectory()) {
+        // Check if the target file is in this subdirectory
+        const candidate = join(fullPath, targetFilename)
+        if (existsSync(candidate)) return candidate
+        // Also check nested dirs (one level deep is usually enough)
+        const nested = findJsonlBySessionId(fullPath, sessionId)
+        if (nested) return nested
+      } else if (entry === targetFilename) {
+        return fullPath
+      }
+    }
+  } catch {
+    // Permission errors or missing dirs — ignore
+  }
+  return null
 }
 
 async function cmdReplay(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -1072,6 +1285,10 @@ ${c.bold}COMMANDS${c.reset}
   ${c.green}blame${c.reset} --graph <id>           Show cost per goal (which goal spent how much)
   ${c.green}diff${c.reset} <graph-a> <graph-b>     Compare two sessions
   ${c.green}fork${c.reset} --graph <id> --at-event <evt>  Fork a session at an event
+        [--run "<instruction>"]      Run Claude on the fork with new instructions
+        [--model <model>]            Model to use (default: claude-sonnet-4)
+        [--max-budget <dollars>]     Budget cap (default: 5.00)
+        [--no-diff]                  Skip auto-diff after run
   ${c.green}replay${c.reset} --graph <id>           Rebuild graph from events (time-travel)
   ${c.green}export-trace${c.reset} --graph <id>     Export trace as JSONL or text
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
@@ -1097,8 +1314,12 @@ ${c.bold}EXAMPLES${c.reset}
   ${c.dim}# View a single event's full payload${c.reset}
   operad-session inspect --graph session_1716000000000 --event evt_17160000
 
-  ${c.dim}# Fork at an event (what-if analysis)${c.reset}
+  ${c.dim}# Fork at an event (empty fork for manual changes)${c.reset}
   operad-session fork --graph session_1716000000000 --at-event evt_17160000 --label cautious
+
+  ${c.dim}# Fork and run Claude with alternative instructions${c.reset}
+  operad-session fork --graph session_1716000000000 --at-event evt_17160000 \\
+    --run "Use session cookies instead of JWT" --model claude-sonnet-4 --max-budget 2.00
 
   ${c.dim}# Compare parent vs fork${c.reset}
   operad-session diff session_1716000000000 session_1716000000000_cautious
