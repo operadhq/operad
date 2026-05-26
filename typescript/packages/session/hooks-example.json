@@ -1,49 +1,58 @@
 {
   "$schema": "https://docs.anthropic.com/claude-code/hooks-schema.json",
   "_comment": [
-    "Example Claude Code hooks configuration for @operad/session.",
-    "Copy this into your project's .claude/settings.json under the 'hooks' key.",
-    "The hook emits events into ~/.operad/session.db in real-time.",
+    "Operad ambient hooks — zero-config session tracking for Claude Code.",
+    "",
+    "Copy this into your project's .claude/settings.json under the 'hooks' key,",
+    "or run: operad-session init (creates .claude/settings.json for you).",
+    "",
+    "What you get:",
+    "  • Session start: prints graph ID and DB path",
+    "  • Every tool call: recorded to ~/.operad/session.db in real-time",
+    "  • Every 20 tool calls: progress hint in terminal",
+    "  • Session end: summary (tools, reads, writes, redundant reads)",
+    "                 + commands to inspect, visualize, and analyze cost",
     "",
     "Environment variables:",
     "  OPERAD_DB_PATH     — Override the database path (default: ~/.operad/session.db)",
-    "  OPERAD_GRAPH_ID    — Override the graph ID (default: CLAUDE_SESSION_ID or 'default')"
+    "  OPERAD_GRAPH_ID    — Override the graph ID (default: CLAUDE_SESSION_ID)"
   ],
   "hooks": {
+    "SessionStart": [
+      {
+        "command": "echo '{\"hook_type\":\"SessionStart\",\"session_id\":\"$CLAUDE_SESSION_ID\"}' | node node_modules/@operad/session/dist/hook.js",
+        "description": "Initialize Operad graph and print tracking banner"
+      }
+    ],
     "PreToolUse": [
       {
         "command": "echo '{\"hook_type\":\"PreToolUse\",\"tool_name\":\"$TOOL_NAME\",\"tool_input\":$TOOL_INPUT,\"session_id\":\"$CLAUDE_SESSION_ID\"}' | node node_modules/@operad/session/dist/hook.js",
-        "description": "Emit tool_called event to Operad graph before tool execution"
+        "description": "Record tool call to Operad graph (pre-execution)"
       }
     ],
     "PostToolUse": [
       {
         "command": "echo '{\"hook_type\":\"PostToolUse\",\"tool_name\":\"$TOOL_NAME\",\"tool_input\":$TOOL_INPUT,\"session_id\":\"$CLAUDE_SESSION_ID\"}' | node node_modules/@operad/session/dist/hook.js",
-        "description": "Emit tool_called event to Operad graph after tool execution"
+        "description": "Record tool result and show progress hints"
       }
     ],
     "Notification": [
       {
         "command": "node node_modules/@operad/session/dist/hook.js",
-        "description": "Emit goal.set event when user sends a message (payload piped via stdin)"
+        "description": "Record user goals (messages) to Operad graph"
       }
-    ]
-  },
-  "_usage_notes": {
-    "install": "npm install @operad/session",
-    "query_from_code": [
-      "import { queryFileState } from '@operad/session/query'",
-      "",
-      "const state = await queryFileState('/path/to/file.ts')",
-      "if (state?.hasBeenRead) {",
-      "  console.log(`Already read at ${state.lastReadAt}, skipping...`)",
-      "}"
     ],
-    "query_goals": [
-      "import { queryGoals } from '@operad/session/query'",
-      "",
-      "const goals = await queryGoals()",
-      "// [{ goal: 'Fix the login bug', timestamp: '2025-...' }]"
+    "Stop": [
+      {
+        "command": "echo '{\"hook_type\":\"Stop\",\"session_id\":\"$CLAUDE_SESSION_ID\"}' | node node_modules/@operad/session/dist/hook.js",
+        "description": "Print session summary: tools, reads, writes, waste, next steps"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "command": "echo '{\"hook_type\":\"SessionEnd\",\"session_id\":\"$CLAUDE_SESSION_ID\"}' | node node_modules/@operad/session/dist/hook.js",
+        "description": "Final cleanup and session end marker"
+      }
     ]
   }
 }
