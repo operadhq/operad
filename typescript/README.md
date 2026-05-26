@@ -75,6 +75,34 @@ Operad uses git-shaped semantics for agent cognition. These are real operations,
 | `git diff` | `operad-session diff` | Compare two session graphs structurally |
 | — | `operad-session explore <id> -n 3` | Fork N alternatives, score, commit best |
 
+## Fork + Run — Compare Agent Approaches
+
+Fork a session at any decision point and run Claude with alternative instructions:
+
+```bash
+operad-session fork --graph session_123 --at-event evt_5 \
+  --run "Use session cookies instead of JWT" \
+  --model claude-sonnet-4 --max-budget 3.00
+```
+
+This spawns a real Claude CLI session on the forked branch, captures the JSONL, commits it to the fork graph, and auto-diffs the results. The workflow composes with `explore()` for plan-level speculation:
+
+1. **Think** — `explore()` forks N branches in the graph, scores plans (cheap)
+2. **Execute** — `fork --run` executes the best plan with real Claude sessions
+3. **Compare** — `diff` shows what each approach produced
+
+See [`@operad/session` README](./packages/session/README.md) and [`docs/PHILOSOPHY.md`](../docs/PHILOSOPHY.md).
+
+## Demos
+
+```bash
+cd apps/example
+pnpm demo:quickstart       # Core primitives in 2 minutes
+pnpm demo:transactional    # Effect categories, governance, parallel speculation
+pnpm demo:fork             # Fork + diff for what-if analysis
+pnpm demo:primitives       # All 7 primitives
+```
+
 ## Core Concepts
 
 ### Event Sourcing
@@ -138,6 +166,7 @@ Tools are categorized by reversibility:
 | **Atomix** — Transactional Tool Calls | Compensate-on-abort, parallel speculation | [2602.14849](https://arxiv.org/abs/2602.14849) |
 | **Fork, Explore, Commit** — OS Primitives for Agents | Fork/explore/commit for cognition | [2602.08199](https://arxiv.org/abs/2602.08199) |
 | **SagaLLM** — Saga Pattern for Multi-Agent | Compensation in multi-step agent workflows | [2503.11951](https://arxiv.org/abs/2503.11951) |
+| **ParallelMuse** — Parallel Thinking for Deep Research | Branch at uncertainty, explore N paths | [2510.24698](https://arxiv.org/abs/2510.24698) |
 
 Each validates one primitive in isolation. Operad unifies them into a single TypeScript runtime.
 

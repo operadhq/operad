@@ -262,25 +262,105 @@ operad serve --port 3111            # Start REST API server
 
 ---
 
+## Session — Git for AI Coding Sessions
+
+Import Claude Code (or Codex, OpenCode) sessions into the event graph. Analyze, fork, and compare.
+
+```bash
+# Import a session
+operad-session commit ~/.claude/projects/myapp/session.jsonl
+
+# See what happened
+operad-session log --graph session_123
+operad-session blame --graph session_123
+
+# Fork at a decision and try something different
+operad-session fork --graph session_123 --at-event evt_5 \
+  --run "Use session cookies instead of JWT" \
+  --model claude-sonnet-4 --max-budget 3.00
+
+# Compare the two approaches
+operad-session diff session_123 session_123_fork
+```
+
+The full git vocabulary: `commit`, `log`, `blame`, `stash`, `diff`, `fork`, `revert`, `replay`, `explore`, `view`.
+
+See [`@operad/session` README](./typescript/packages/session/README.md) for details.
+
+---
+
+## Transactional Execution
+
+Operad isn't just a log viewer. Effects are categorized, changes are governed, and speculation is isolated.
+
+| Capability | How it works |
+|---|---|
+| **Effect categories** | Tools classified as `pure` / `bufferable` / `externalized` |
+| **Governance** | `propose()` → pending patch → `approve()` or `deny()` |
+| **Parallel speculation** | `explore()` — fork N branches, score, pick winner |
+| **Compensation** | `revert()` with Saga-style reversal handlers |
+| **Causal tracing** | `traceBackward()` from any event to its root cause |
+
+Inspired by [Atomix](https://arxiv.org/abs/2602.14849). See [`docs/PHILOSOPHY.md`](./docs/PHILOSOPHY.md) for the full design rationale.
+
+---
+
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [`@operad/core`](./typescript/packages/core) | Runtime, graph, event log, behaviors, decisions, health, patterns, patches |
+| [`@operad/core`](./typescript/packages/core) | Runtime, graph, event log, behaviors, decisions, health, patterns, patches, effects |
+| [`@operad/session`](./typescript/packages/session) | JSONL importer + git-like CLI for agent sessions (fork, diff, blame, explore) |
 | [`@operad/adapter-memory`](./typescript/packages/adapter-memory) | In-memory storage (dev/testing) |
+| [`@operad/adapter-sqlite`](./typescript/packages/adapter-sqlite) | SQLite storage (lightweight production) |
 | [`@operad/adapter-postgres`](./typescript/packages/adapter-postgres) | PostgreSQL storage (production) |
 | [`@operad/server`](./typescript/packages/server) | REST API + CLI + Dashboard |
 | [`@operad/know`](./typescript/packages/know) | Knowledge extraction from documents |
 
 ---
 
+## Demos
+
+Run any demo to see the primitives in action:
+
+```bash
+cd typescript/apps/example
+
+pnpm demo:quickstart       # Core primitives in 2 minutes (graph, decisions, fork, diff)
+pnpm demo:transactional    # Atomix-style: effect categories, governance, parallel speculation
+pnpm demo:fork             # Fork at a decision, simulate alternative, diff results
+pnpm demo:primitives       # All 7 primitives (actors, relations, views, LLM, patterns, patches)
+```
+
+See [`examples/`](./typescript/packages/session/examples/) for use-case workflows:
+- [Fork and compare two approaches](./typescript/packages/session/examples/fork-and-compare.sh)
+- [Understand your AI spend](./typescript/packages/session/examples/cost-analysis.sh)
+- [Explore multiple alternatives](./typescript/packages/session/examples/explore-alternatives.sh)
+- [Debug an expensive session](./typescript/packages/session/examples/session-forensics.sh)
+
+---
+
 ## Use Cases
 
+- **AI coding agents** — Fork at decisions, compare approaches, track cost per goal
 - **Insurance** — Audit trails for claim decisions, cross-session customer memory
 - **Healthcare** — Provenance tracking for AI diagnostic recommendations
 - **Finance** — Regulatory compliance with full causal chain evidence
 - **Multi-step agents** — Self-healing workflows with reactive error handling
-- **Knowledge management** — Graphs that detect and flag stale data
+
+---
+
+## Research Foundations
+
+| Paper | Primitive | arXiv |
+|-------|-----------|-------|
+| **Atomix** — Transactional Tool Calls | Effect categories, compensation, speculation isolation | [2602.14849](https://arxiv.org/abs/2602.14849) |
+| **ESAA** — Event Sourcing as Agent Architecture | Event sourcing as native agent design | [2602.23193](https://arxiv.org/abs/2602.23193) |
+| **AgentGit** — Version Control for Agent Execution | Git semantics for agent traces | [2511.00628](https://arxiv.org/abs/2511.00628) |
+| **Fork, Explore, Commit** — OS Primitives for Agents | Fork/explore/commit for cognition | [2602.08199](https://arxiv.org/abs/2602.08199) |
+| **ParallelMuse** — Parallel Thinking for Deep Research | Branch at uncertainty, explore N paths | [2510.24698](https://arxiv.org/abs/2510.24698) |
+
+Each validates one primitive in isolation. Operad unifies them into a single TypeScript runtime.
 
 ---
 
@@ -290,7 +370,7 @@ operad serve --port 3111            # Start REST API server
 cd typescript
 pnpm install
 pnpm build
-pnpm test     # 69 core tests + 12 know tests
+pnpm -r test     # 66 session tests + 69 core tests
 ```
 
 ## Contributing
