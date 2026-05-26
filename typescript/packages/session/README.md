@@ -5,6 +5,15 @@ Git for AI agent sessions. Import, analyze, branch, and compare agent work.
 <!-- TODO: Add terminal recording GIF here showing fork --run workflow -->
 <!-- asciinema rec demo.cast && svg-term --in demo.cast --out demo.svg -->
 
+## Try It (2 minutes)
+
+```bash
+npm install @operad/core @operad/adapter-memory
+npx tsx examples/quickstart.ts
+```
+
+Creates a graph, records a decision, forks at that decision, runs an alternative, and diffs the two. See [examples/quickstart.ts](./examples/quickstart.ts).
+
 ## Quick Start
 
 ```bash
