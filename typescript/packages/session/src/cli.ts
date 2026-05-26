@@ -1216,6 +1216,91 @@ async function cmdView(positional: string[], flags: Record<string, string | bool
   }
 }
 
+// ─── Init Command ───────────────────────────────────────────────────────────
+
+async function cmdInit(): Promise<void> {
+  const settingsDir = join(process.cwd(), '.claude')
+  const settingsPath = join(settingsDir, 'settings.json')
+
+  // Build the hooks config
+  const operadHooks = {
+    SessionStart: [
+      {
+        command: `echo '{"hook_type":"SessionStart","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
+        description: 'Initialize Operad graph and print tracking banner',
+      },
+    ],
+    PreToolUse: [
+      {
+        command: `echo '{"hook_type":"PreToolUse","tool_name":"$TOOL_NAME","tool_input":$TOOL_INPUT,"session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
+        description: 'Record tool call to Operad graph (pre-execution)',
+      },
+    ],
+    PostToolUse: [
+      {
+        command: `echo '{"hook_type":"PostToolUse","tool_name":"$TOOL_NAME","tool_input":$TOOL_INPUT,"session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
+        description: 'Record tool result and show progress hints',
+      },
+    ],
+    Notification: [
+      {
+        command: 'node node_modules/@operad/session/dist/hook.js',
+        description: 'Record user goals (messages) to Operad graph',
+      },
+    ],
+    Stop: [
+      {
+        command: `echo '{"hook_type":"Stop","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
+        description: 'Print session summary: tools, reads, writes, waste, next steps',
+      },
+    ],
+    SessionEnd: [
+      {
+        command: `echo '{"hook_type":"SessionEnd","session_id":"$CLAUDE_SESSION_ID"}' | node node_modules/@operad/session/dist/hook.js`,
+        description: 'Final cleanup and session end marker',
+      },
+    ],
+  }
+
+  // Read existing settings or create new
+  let settings: Record<string, unknown> = {}
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    } catch {
+      // Corrupted settings — start fresh
+    }
+  }
+
+  // Merge hooks (don't overwrite existing non-Operad hooks)
+  const existingHooks = (settings.hooks ?? {}) as Record<string, unknown[]>
+  for (const [event, hooks] of Object.entries(operadHooks)) {
+    const existing = existingHooks[event] ?? []
+    // Remove any previous Operad hooks (by checking for operad-session in command)
+    const nonOperad = (existing as Array<{ command?: string }>).filter(
+      (h) => !h.command?.includes('operad-session')
+    )
+    existingHooks[event] = [...nonOperad, ...hooks]
+  }
+  settings.hooks = existingHooks
+
+  // Write
+  mkdirSync(settingsDir, { recursive: true })
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+
+  console.log(`${c.green}✓${c.reset} Operad hooks installed in ${c.cyan}.claude/settings.json${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}What happens now:${c.reset}`)
+  console.log(`    ${c.green}•${c.reset} Every Claude Code session is tracked automatically`)
+  console.log(`    ${c.green}•${c.reset} Session start/end summaries appear in your terminal`)
+  console.log(`    ${c.green}•${c.reset} Data stored in ${c.dim}~/.operad/session.db${c.reset}`)
+  console.log()
+  console.log(`  ${c.bold}After a session, try:${c.reset}`)
+  console.log(`    ${c.dim}operad-session inspect --graph <session-id>${c.reset}`)
+  console.log(`    ${c.dim}operad-session blame --graph <session-id>${c.reset}`)
+  console.log(`    ${c.dim}operad-session view --graph <session-id>${c.reset}`)
+}
+
 // ─── Stash Helpers ──────────────────────────────────────────────────────────
 
 interface FileReadInfo {
@@ -1277,6 +1362,7 @@ ${c.bold}USAGE${c.reset}
   operad-session <command> [options]
 
 ${c.bold}COMMANDS${c.reset}
+  ${c.green}init${c.reset}                         Set up Claude Code hooks (auto-tracking)
   ${c.green}commit${c.reset} <path.jsonl>          Import JSONL into the persistent graph
   ${c.green}inspect${c.reset} --graph <id>          Show run summary (events, goals, cost, tail)
   ${c.green}inspect${c.reset} --graph <id> --event <evt>  Show full payload for one event
@@ -1305,6 +1391,9 @@ ${c.bold}STORAGE${c.reset}
   All data is persisted to: ${c.dim}${DB_PATH}${c.reset}
 
 ${c.bold}EXAMPLES${c.reset}
+  ${c.dim}# Enable auto-tracking (one-time setup)${c.reset}
+  operad-session init
+
   ${c.dim}# Import a Claude Code session${c.reset}
   operad-session commit ~/.claude/projects/myapp/session.jsonl
 
@@ -1361,6 +1450,9 @@ async function main() {
   }
 
   switch (command) {
+    case 'init':
+      await cmdInit()
+      break
     case 'commit':
       await cmdCommit(positional, flags)
       break

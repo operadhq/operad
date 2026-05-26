@@ -27,7 +27,8 @@
     "build": "tsup",
     "test": "vitest run --passWithNoTests",
     "clean": "rm -rf dist",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run build",
+    "postinstall": "echo '\n  📊 @operad/session installed.\n     Run \"operad-session init\" to enable auto-tracking for Claude Code.\n'"
   },
   "publishConfig": {
     "access": "public"
