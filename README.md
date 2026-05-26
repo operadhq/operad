@@ -5,8 +5,11 @@
 Every mutation is an event. Every event has a cause. Every decision is recorded.
 
 ```bash
-npx @operad/server demo primitives
+npx @operad/session demo coding --html
 ```
+
+> **Cloud viewer coming soon** — share agent sessions with your team via URL.
+> [**Get notified →**](https://operad.dev/#notify)
 
 ```
 ◆ Operad — 7 New Primitives Demo
@@ -394,6 +397,9 @@ Each opens an interactive HTML viewer with three timeline modes:
 - **Swim Lanes** — events by actor with causal arrows crossing lanes
 - **Causal Chain** — tree view (like `git log --graph` for agent cognition)
 - **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
+
+> **Want to share sessions with your team?** The cloud viewer is coming.
+> [**Sign up for early access →**](https://operad.dev/#notify)
 
 ### Runtime demos
 
