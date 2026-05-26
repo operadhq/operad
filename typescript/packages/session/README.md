@@ -12,13 +12,28 @@ Hooks auto-configure for Claude Code, Codex, and OpenCode. Start coding — afte
 operad-session log --graph <session-id>
 ```
 
-### Try the interactive demo
+### Try the interactive demos
 
 ```bash
-operad-session demo primitives
+operad-session demo primitives        # Runtime primitives (actor, behaviors, patches, forking)
+operad-session demo coding            # Coding agent — JWT auth with thinking + tool use
+operad-session demo financial-analyst  # SaaS revenue analysis and forecasting
+operad-session demo insurance          # Claims processing with fraud detection
+operad-session demo customer-support   # Debugging permissions, fixing code
+operad-session demo hedge-fund         # Biotech screening and position sizing
+operad-session demo research-agent     # RAG literature survey and benchmarks
 ```
 
-Walks you through all 7 primitives step-by-step: actor provenance, relation behaviors, scoped views, LLM integration, governance patches, forking, and pattern matching.
+Add `--html` to open the interactive timeline viewer in your browser:
+
+```bash
+operad-session demo coding --html
+```
+
+The timeline viewer includes three visualization modes:
+- **Swim Lanes** — events by actor (user / agent / thinking) with causal arrows
+- **Causal Chain** — tree view showing event causality (like `git log --graph`)
+- **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
 
 ```
 session_a3f7c2d1 — 142 events (309 total)
@@ -130,6 +145,7 @@ operad-session diff <session-id> <session-id>_fork
 
 | Command | What it does |
 |---------|-------------|
+| `demo [name]` | Run a built-in demo (`--list` to see all, `--html` for browser) |
 | `commit <path.jsonl>` | Import a JSONL session into the graph |
 | `inspect --graph <id>` | Show session summary (events, goals, cost) |
 | `log --graph <id>` | Event history (like `git log`) |

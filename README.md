@@ -43,30 +43,64 @@ npx @operad/server demo primitives
 
 ## Quick Start
 
-**Try it (10 seconds):**
+### A. You use a coding agent (Claude Code, Codex, OpenCode)
+
 ```bash
-npx @operad/server demo primitives
+npm install @operad/session
 ```
 
-**Build your own agent (5 minutes):**
-```bash
-npx @operad/server init my-agent
-cd my-agent && npm install
-npx tsx src/agent.ts
-```
+Done. Every session is logged. See [Session](#session--see-what-your-ai-coding-agent-did) below.
 
-**Go to production (30 minutes):**
+### B. You're building an AI agent (finance, insurance, healthcare, etc.)
+
 ```bash
-npm install @operad/core @operad/adapter-postgres
+npm install @operad/core @operad/adapter-sqlite
 ```
 
 ```typescript
 import { createRuntime } from '@operad/core'
-import { PostgresAdapter } from '@operad/adapter-postgres'
+import { SqliteAdapter } from '@operad/adapter-sqlite'
 
-const runtime = createRuntime({
-  storage: new PostgresAdapter({ connectionString: process.env.DATABASE_URL! }),
+const runtime = createRuntime({ storage: new SqliteAdapter('./agent.db') })
+const graph = await runtime.createGraph('portfolio-review')
+
+// Your agent builds a knowledge graph as it works
+const position = await graph.addObject({
+  type: 'position',
+  data: { ticker: 'AAPL', shares: 150, avgCost: 178.50 },
 })
+
+const signal = await graph.addObject({
+  type: 'signal',
+  data: { source: 'earnings_call', sentiment: 'bearish', confidence: 0.82 },
+})
+
+await graph.addRelation(signal.id, position.id, 'affects')
+
+// Agent records its decision with full reasoning
+await graph.recordDecision({
+  selectedAction: 'reduce_position',
+  alternatives: [
+    { action: 'hold', rejected: 'bearish signal above confidence threshold' },
+    { action: 'exit_fully', rejected: 'position still within risk tolerance' },
+  ],
+  confidence: 0.78,
+  reasoning: 'Earnings miss + guidance cut. Reduce by 30% to manage downside.',
+})
+
+// Trace any decision back to its cause
+const chain = await graph.traceBackward(position.createdByEventId)
+// → object.created → graph.created (full audit trail)
+```
+
+Every mutation is an event. Every decision is recorded with alternatives and reasoning. Regulators, compliance teams, and future-you can trace any action back to its root cause.
+
+```bash
+# Inspect what the agent did
+npx operad graph inspect portfolio-review
+
+# See all decisions and their reasoning
+npx operad graph events portfolio-review
 ```
 
 ---
@@ -195,7 +229,8 @@ const matches = await matchPattern(parsed, graph)
 The `operad` CLI provides full graph inspection without a browser.
 
 ```bash
-operad demo primitives              # Run the full demo
+operad demo primitives              # Interactive walkthrough of all 7 primitives
+operad demo                         # List available demos
 operad init my-agent                # Scaffold a new project
 operad graph inspect my-graph       # ASCII visualization + tables
 operad graph events my-graph        # Event timeline
@@ -262,25 +297,47 @@ operad serve --port 3111            # Start REST API server
 
 ---
 
-## Session — Git for AI Coding Sessions
-
-Import Claude Code (or Codex, OpenCode) sessions into the event graph. Analyze, fork, and compare.
+## Session — See What Your AI Coding Agent Did
 
 ```bash
-# Import a session
-operad-session commit ~/.claude/projects/myapp/session.jsonl
+npm install @operad/session
+```
 
-# See what happened
-operad-session log --graph session_123
-operad-session blame --graph session_123
+Auto-configures for Claude Code, Codex, and OpenCode. After your session:
 
-# Fork at a decision and try something different
-operad-session fork --graph session_123 --at-event evt_5 \
-  --run "Use session cookies instead of JWT" \
-  --model claude-sonnet-4 --max-budget 3.00
+```bash
+operad-session graph --graph <session-id>
+```
 
-# Compare the two approaches
-operad-session diff session_123 session_123_fork
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  OPERAD EVENT GRAPH — session_a3f7c2d1                             ║
+║  309 events │ 4 goals │ 87 tools │ $12.40 cost                    ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+  ★ Goal #1: Fix the authentication bug in login flow
+  │
+  ├── ⚙ Tools: Read×5, Edit×1, Grep×2, Bash×1
+  ├── Events: 24
+  │
+  ★ Goal #2: Refactor auth to use JWT instead of sessions
+  │
+  ├── ⚙ Tools: Read×12, Edit×6, Write×2, Bash×4
+  ├── $ Cost: $8.20
+  ├── Events: 63
+  │
+  ╰── ◉ Graph complete: 309 events
+```
+
+Every file read, every edit, every decision — the full trace of how your agent got there.
+
+```bash
+operad-session log --graph <id>        # Event trace
+operad-session blame --graph <id>      # Cost per goal
+operad-session stash --graph <id>      # Wasted work
+operad-session fork --graph <id> \     # Try a different approach
+  --at-event <evt> --run "Use cookies instead of JWT"
+operad-session diff <id-a> <id-b>      # Compare two approaches
 ```
 
 The full git vocabulary: `commit`, `log`, `blame`, `stash`, `diff`, `fork`, `revert`, `replay`, `explore`, `view`.
@@ -310,7 +367,7 @@ Inspired by [Atomix](https://arxiv.org/abs/2602.14849). See [`docs/PHILOSOPHY.md
 | Package | Description |
 |---------|-------------|
 | [`@operad/core`](./typescript/packages/core) | Runtime, graph, event log, behaviors, decisions, health, patterns, patches, effects |
-| [`@operad/session`](./typescript/packages/session) | JSONL importer + git-like CLI for agent sessions (fork, diff, blame, explore) |
+| [`@operad/session`](./typescript/packages/session) | Auto-tracking for coding agents (Claude, Codex, OpenCode) + git-like CLI (fork, diff, blame) |
 | [`@operad/adapter-memory`](./typescript/packages/adapter-memory) | In-memory storage (dev/testing) |
 | [`@operad/adapter-sqlite`](./typescript/packages/adapter-sqlite) | SQLite storage (lightweight production) |
 | [`@operad/adapter-postgres`](./typescript/packages/adapter-postgres) | PostgreSQL storage (production) |
@@ -321,7 +378,24 @@ Inspired by [Atomix](https://arxiv.org/abs/2602.14849). See [`docs/PHILOSOPHY.md
 
 ## Demos
 
-Run any demo to see the primitives in action:
+### Session demos (interactive timeline viewer)
+
+```bash
+operad-session demo coding --html            # Coding agent — JWT auth with thinking + tool use
+operad-session demo financial-analyst --html  # SaaS revenue analysis and forecasting
+operad-session demo insurance --html          # Claims processing with fraud detection
+operad-session demo customer-support --html   # Debugging permissions, fixing code
+operad-session demo hedge-fund --html         # Biotech screening and position sizing
+operad-session demo research-agent --html     # RAG literature survey and benchmarks
+operad-session demo primitives --html         # All 7 runtime primitives
+```
+
+Each opens an interactive HTML viewer with three timeline modes:
+- **Swim Lanes** — events by actor with causal arrows crossing lanes
+- **Causal Chain** — tree view (like `git log --graph` for agent cognition)
+- **Waterfall** — phase gantt per goal (Thinking → Research → Implement → Verify)
+
+### Runtime demos
 
 ```bash
 cd typescript/apps/example
