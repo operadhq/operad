@@ -453,6 +453,80 @@ function buildHtml(
     font-size: 11px; color: #555; flex-shrink: 0;
   }
 
+  /* Subscribe banner */
+  .subscribe-banner {
+    background: linear-gradient(90deg, #1a1040 0%, #12122a 100%);
+    border-bottom: 1px solid #2a2a4a;
+    padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; color: #9090b0;
+    flex-shrink: 0;
+  }
+  .subscribe-banner.hidden { display: none; }
+  .subscribe-banner { animation: slideBannerIn 0.3s ease-out; }
+  @keyframes slideBannerIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: translateY(0); } }
+  .subscribe-text { display: flex; align-items: center; gap: 8px; }
+  .subscribe-text strong { color: #c0c0e0; font-weight: 500; }
+  .subscribe-form { display: flex; gap: 8px; align-items: center; }
+  .subscribe-form input[type="email"] {
+    background: #0c0a1d; border: 1px solid #2a2a4a; border-radius: 4px;
+    color: #e0e0e0; padding: 5px 10px; font-size: 12px; width: 220px;
+    outline: none; transition: border-color 0.15s;
+  }
+  .subscribe-form input[type="email"]:focus { border-color: #4a6cf7; }
+  .subscribe-form input[type="email"]::placeholder { color: #555; }
+  .subscribe-btn {
+    background: #2B5CE6; color: #fff; border: none; border-radius: 4px;
+    padding: 5px 14px; font-size: 12px; cursor: pointer; font-weight: 500;
+    transition: background 0.15s;
+  }
+  .subscribe-btn:hover { background: #3d6ef7; }
+  .subscribe-btn:disabled { opacity: 0.6; cursor: default; }
+  .subscribe-dismiss {
+    background: none; border: none; color: #555; cursor: pointer;
+    font-size: 16px; padding: 0 4px; line-height: 1;
+  }
+  .subscribe-dismiss:hover { color: #888; }
+  .subscribe-ok { color: #4ade80; font-size: 12px; }
+
+  /* Feedback panel */
+  .fb-overlay { display: none; position: fixed; inset: 0; z-index: 999; }
+  .fb-overlay.open { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); }
+  .fb-panel {
+    background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px;
+    width: 400px; max-width: 90vw; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    animation: fbIn 0.2s ease-out;
+  }
+  @keyframes fbIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+  .fb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .fb-header h3 { margin: 0; font-size: 14px; color: #e0e0e0; font-weight: 500; }
+  .fb-close { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 0; }
+  .fb-close:hover { color: #888; }
+  .fb-tabs { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 1px solid #2a2a4a; }
+  .fb-tab {
+    padding: 6px 14px; font-size: 12px; color: #666; cursor: pointer;
+    border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none;
+  }
+  .fb-tab:hover { color: #aaa; }
+  .fb-tab.active { color: #88aaff; border-bottom-color: #88aaff; }
+  .fb-textarea {
+    width: 100%; min-height: 80px; background: #0c0a1d; border: 1px solid #2a2a4a;
+    border-radius: 4px; color: #e0e0e0; padding: 8px 10px; font-size: 13px;
+    font-family: inherit; resize: vertical; outline: none; transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+  .fb-textarea:focus { border-color: #4a6cf7; }
+  .fb-textarea::placeholder { color: #555; }
+  .fb-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .fb-submit {
+    background: #2B5CE6; color: #fff; border: none; border-radius: 4px;
+    padding: 6px 16px; font-size: 12px; cursor: pointer; font-weight: 500;
+    transition: background 0.15s;
+  }
+  .fb-submit:hover { background: #3d6ef7; }
+  .fb-submit:disabled { opacity: 0.6; cursor: default; }
+  .fb-hint { font-size: 11px; color: #555; margin-top: 8px; }
+
   /* Responsive */
   @media (max-width: 768px) {
     .main { flex-direction: column; }
@@ -460,6 +534,8 @@ function buildHtml(
     .right-panel { height: 60%; }
     .toolbar { padding: 0 8px; }
     .toolbar .session-info { display: none; }
+    .subscribe-banner { flex-direction: column; gap: 8px; text-align: center; }
+    .subscribe-form input[type="email"] { width: 160px; }
   }
 </style>
 </head>
@@ -489,6 +565,42 @@ function buildHtml(
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 8.5a3 3 0 004.5.5l2-2a3 3 0 00-4.24-4.24l-1.14 1.14"/><path d="M10 7.5a3 3 0 00-4.5-.5l-2 2a3 3 0 004.24 4.24l1.14-1.14"/></svg>
         Share
       </button>
+      <button class="tb-btn" id="btn-feedback" title="Send feedback">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H5l-3 3V3z"/></svg>
+        Feedback
+      </button>
+    </div>
+  </div>
+
+  <!-- Feedback modal -->
+  <div class="fb-overlay" id="fb-overlay">
+    <div class="fb-panel">
+      <div class="fb-header">
+        <h3>Feedback</h3>
+        <button class="fb-close" id="fb-close">&times;</button>
+      </div>
+      <div class="fb-tabs">
+        <button class="fb-tab active" data-fb-type="comment">Session comment</button>
+        <button class="fb-tab" data-fb-type="feedback">Product feedback</button>
+      </div>
+      <textarea class="fb-textarea" id="fb-text" placeholder="What do you think about this session?"></textarea>
+      <div class="fb-hint" id="fb-hint">Comments are attached to this session.</div>
+      <div class="fb-footer">
+        <button class="fb-submit" id="fb-submit">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Subscribe banner -->
+  <div class="subscribe-banner hidden" id="subscribe-banner">
+    <div class="subscribe-text">
+      <strong>Trace your own agent sessions</strong>
+      <span>— get notified when Operad launches.</span>
+    </div>
+    <div class="subscribe-form">
+      <input type="email" id="subscribe-email" placeholder="you@company.com" autocomplete="email" />
+      <button class="subscribe-btn" id="subscribe-btn">Notify me</button>
+      <button class="subscribe-dismiss" id="subscribe-dismiss" title="Dismiss">&times;</button>
     </div>
   </div>
 
@@ -888,6 +1000,143 @@ function buildHtml(
     d.textContent = s;
     return d.innerHTML;
   }
+
+  // ─── Feedback panel ─────────────────────────────────────
+  (function() {
+    var overlay = document.getElementById('fb-overlay');
+    var openBtn = document.getElementById('btn-feedback');
+    var closeBtn = document.getElementById('fb-close');
+    var textarea = document.getElementById('fb-text');
+    var submitBtn = document.getElementById('fb-submit');
+    var hint = document.getElementById('fb-hint');
+    if (!overlay || !openBtn || !textarea || !submitBtn) return;
+
+    var fbType = 'comment';
+    var tabs = overlay.querySelectorAll('.fb-tab');
+
+    openBtn.addEventListener('click', function() { overlay.classList.add('open'); textarea.focus(); });
+    if (closeBtn) closeBtn.addEventListener('click', function() { overlay.classList.remove('open'); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.classList.remove('open'); });
+
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        tabs.forEach(function(t) { t.classList.remove('active'); });
+        tab.classList.add('active');
+        fbType = tab.getAttribute('data-fb-type');
+        if (fbType === 'comment') {
+          textarea.placeholder = 'What do you think about this session?';
+          hint.textContent = 'Comments are attached to this session.';
+        } else {
+          textarea.placeholder = 'Bug report, feature idea, or general thoughts about Operad...';
+          hint.textContent = 'This opens a GitHub Discussion on the Operad repo.';
+        }
+      });
+    });
+
+    submitBtn.addEventListener('click', function() {
+      var text = (textarea.value || '').trim();
+      if (!text) { textarea.style.borderColor = '#ef4444'; return; }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '...';
+
+      fetch('https://operad.sh/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: fbType,
+          message: text,
+          sessionUrl: window.location.href,
+        })
+      }).then(function(res) {
+        if (res.ok) {
+          textarea.value = '';
+          submitBtn.textContent = 'Sent!';
+          setTimeout(function() {
+            overlay.classList.remove('open');
+            submitBtn.textContent = 'Send';
+            submitBtn.disabled = false;
+          }, 1500);
+          showToast(fbType === 'comment' ? 'Comment saved.' : 'Feedback submitted to GitHub.');
+        } else {
+          submitBtn.textContent = 'Send';
+          submitBtn.disabled = false;
+          showToast('Something went wrong.');
+        }
+      }).catch(function() {
+        submitBtn.textContent = 'Send';
+        submitBtn.disabled = false;
+        showToast('Network error.');
+      });
+    });
+  })();
+
+  // ─── Subscribe banner (shown after first interaction) ──
+  (function() {
+    var banner = document.getElementById('subscribe-banner');
+    var emailInput = document.getElementById('subscribe-email');
+    var btn = document.getElementById('subscribe-btn');
+    var dismissBtn = document.getElementById('subscribe-dismiss');
+    if (!banner || !emailInput || !btn) return;
+
+    // Already handled — stay hidden forever
+    if (localStorage.getItem('operad-subscribed') || localStorage.getItem('operad-dismiss-subscribe')) return;
+
+    // Reveal on first meaningful interaction
+    var revealed = false;
+    function revealBanner() {
+      if (revealed) return;
+      revealed = true;
+      banner.classList.remove('hidden');
+    }
+
+    // Listen on interactive elements: goals, replay, tree nodes, event rows, tabs
+    document.querySelectorAll('.goal-item, .ev-row, .tab, .gt-goal-item').forEach(function(el) {
+      el.addEventListener('click', revealBanner, { once: true });
+    });
+    var replayBtn = document.getElementById('btn-replay');
+    if (replayBtn) replayBtn.addEventListener('click', revealBanner, { once: true });
+    document.addEventListener('click', function(e) {
+      if (e.target.closest && (e.target.closest('.tree-node') || e.target.closest('.tl-event'))) revealBanner();
+    });
+
+    if (dismissBtn) dismissBtn.addEventListener('click', function() {
+      banner.classList.add('hidden');
+      localStorage.setItem('operad-dismiss-subscribe', '1');
+    });
+
+    btn.addEventListener('click', function() {
+      var email = (emailInput.value || '').trim();
+      if (!email || email.indexOf('@') < 1) {
+        emailInput.style.borderColor = '#ef4444';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '...';
+      fetch('https://operad.sh/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+      }).then(function(res) {
+        if (res.ok) {
+          banner.innerHTML = '<span class="subscribe-ok">Thanks! We will let you know when Operad launches.</span>';
+          localStorage.setItem('operad-subscribed', '1');
+        } else {
+          btn.textContent = 'Notify me';
+          btn.disabled = false;
+          showToast('Something went wrong.');
+        }
+      }).catch(function() {
+        btn.textContent = 'Notify me';
+        btn.disabled = false;
+        showToast('Network error.');
+      });
+    });
+
+    emailInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') btn.click();
+      emailInput.style.borderColor = '#2a2a4a';
+    });
+  })();
 })();
 </script>
 </body>
@@ -1837,6 +2086,80 @@ export function renderSessionHtml(
   .tl-node:hover { filter: drop-shadow(0 0 4px rgba(136,170,255,0.5)); }
   .tl-edge { stroke: #444; stroke-width: 1; fill: none; }
 
+  /* Subscribe banner */
+  .subscribe-banner {
+    background: linear-gradient(90deg, #1a1040 0%, #12122a 100%);
+    border-bottom: 1px solid #2a2a4a;
+    padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; color: #9090b0;
+    flex-shrink: 0;
+  }
+  .subscribe-banner.hidden { display: none; }
+  .subscribe-banner { animation: slideBannerIn 0.3s ease-out; }
+  @keyframes slideBannerIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: translateY(0); } }
+  .subscribe-text { display: flex; align-items: center; gap: 8px; }
+  .subscribe-text strong { color: #c0c0e0; font-weight: 500; }
+  .subscribe-form { display: flex; gap: 8px; align-items: center; }
+  .subscribe-form input[type="email"] {
+    background: #0c0a1d; border: 1px solid #2a2a4a; border-radius: 4px;
+    color: #e0e0e0; padding: 5px 10px; font-size: 12px; width: 220px;
+    outline: none; transition: border-color 0.15s;
+  }
+  .subscribe-form input[type="email"]:focus { border-color: #4a6cf7; }
+  .subscribe-form input[type="email"]::placeholder { color: #555; }
+  .subscribe-btn {
+    background: #2B5CE6; color: #fff; border: none; border-radius: 4px;
+    padding: 5px 14px; font-size: 12px; cursor: pointer; font-weight: 500;
+    transition: background 0.15s;
+  }
+  .subscribe-btn:hover { background: #3d6ef7; }
+  .subscribe-btn:disabled { opacity: 0.6; cursor: default; }
+  .subscribe-dismiss {
+    background: none; border: none; color: #555; cursor: pointer;
+    font-size: 16px; padding: 0 4px; line-height: 1;
+  }
+  .subscribe-dismiss:hover { color: #888; }
+  .subscribe-ok { color: #4ade80; font-size: 12px; }
+
+  /* Feedback panel */
+  .fb-overlay { display: none; position: fixed; inset: 0; z-index: 999; }
+  .fb-overlay.open { display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); }
+  .fb-panel {
+    background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 8px;
+    width: 400px; max-width: 90vw; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    animation: fbIn 0.2s ease-out;
+  }
+  @keyframes fbIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+  .fb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .fb-header h3 { margin: 0; font-size: 14px; color: #e0e0e0; font-weight: 500; }
+  .fb-close { background: none; border: none; color: #555; cursor: pointer; font-size: 18px; padding: 0; }
+  .fb-close:hover { color: #888; }
+  .fb-tabs { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 1px solid #2a2a4a; }
+  .fb-tab {
+    padding: 6px 14px; font-size: 12px; color: #666; cursor: pointer;
+    border-bottom: 2px solid transparent; transition: all 0.15s; background: none; border-top: none; border-left: none; border-right: none;
+  }
+  .fb-tab:hover { color: #aaa; }
+  .fb-tab.active { color: #88aaff; border-bottom-color: #88aaff; }
+  .fb-textarea {
+    width: 100%; min-height: 80px; background: #0c0a1d; border: 1px solid #2a2a4a;
+    border-radius: 4px; color: #e0e0e0; padding: 8px 10px; font-size: 13px;
+    font-family: inherit; resize: vertical; outline: none; transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+  .fb-textarea:focus { border-color: #4a6cf7; }
+  .fb-textarea::placeholder { color: #555; }
+  .fb-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .fb-submit {
+    background: #2B5CE6; color: #fff; border: none; border-radius: 4px;
+    padding: 6px 16px; font-size: 12px; cursor: pointer; font-weight: 500;
+    transition: background 0.15s;
+  }
+  .fb-submit:hover { background: #3d6ef7; }
+  .fb-submit:disabled { opacity: 0.6; cursor: default; }
+  .fb-hint { font-size: 11px; color: #555; margin-top: 8px; }
+
   @media (max-width: 768px) {
     .ev-type { min-width: 100px; }
     .session-info { display: none; }
@@ -1845,6 +2168,8 @@ export function renderSessionHtml(
     .gt-left { width: 100%; max-width: none; height: 40%; min-width: auto; border-right: none; border-bottom: 1px solid #2a2a4a; }
     .gt-right { height: 60%; }
     .graph-detail { width: 100%; position: absolute; right: 0; top: 0; height: 100%; }
+    .subscribe-banner { flex-direction: column; gap: 8px; text-align: center; }
+    .subscribe-form input[type="email"] { width: 160px; }
   }
 </style>
 </head>
@@ -1870,6 +2195,26 @@ export function renderSessionHtml(
   <div class="toolbar-right">
     <button class="tb-btn" id="btn-replay" title="Replay events chronologically">▶ Replay</button>
     <button class="tb-btn" id="btn-download" title="Download this HTML file">↓ Save</button>
+    <button class="tb-btn" id="btn-feedback" title="Send feedback">💬 Feedback</button>
+  </div>
+</div>
+
+<!-- Feedback modal -->
+<div class="fb-overlay" id="fb-overlay">
+  <div class="fb-panel">
+    <div class="fb-header">
+      <h3>Feedback</h3>
+      <button class="fb-close" id="fb-close">&times;</button>
+    </div>
+    <div class="fb-tabs">
+      <button class="fb-tab active" data-fb-type="comment">Session comment</button>
+      <button class="fb-tab" data-fb-type="feedback">Product feedback</button>
+    </div>
+    <textarea class="fb-textarea" id="fb-text" placeholder="What do you think about this session?"></textarea>
+    <div class="fb-hint" id="fb-hint">Comments are attached to this session.</div>
+    <div class="fb-footer">
+      <button class="fb-submit" id="fb-submit">Send</button>
+    </div>
   </div>
 </div>
 
@@ -1883,6 +2228,19 @@ export function renderSessionHtml(
   </div>
   <div class="tab" data-tab="timeline">
     Timeline <span class="tab-count">${streamEvents.length}</span>
+  </div>
+</div>
+
+<!-- Subscribe banner -->
+<div class="subscribe-banner hidden" id="subscribe-banner">
+  <div class="subscribe-text">
+    <strong>Trace your own agent sessions</strong>
+    <span>— get notified when Operad launches.</span>
+  </div>
+  <div class="subscribe-form">
+    <input type="email" id="subscribe-email" placeholder="you@company.com" autocomplete="email" />
+    <button class="subscribe-btn" id="subscribe-btn">Notify me</button>
+    <button class="subscribe-dismiss" id="subscribe-dismiss" title="Dismiss">&times;</button>
   </div>
 </div>
 
@@ -3177,6 +3535,143 @@ export function renderSessionHtml(
     d.textContent = s;
     return d.innerHTML;
   }
+
+  // ─── Feedback panel ─────────────────────────────────────
+  (function() {
+    var overlay = document.getElementById('fb-overlay');
+    var openBtn = document.getElementById('btn-feedback');
+    var closeBtn = document.getElementById('fb-close');
+    var textarea = document.getElementById('fb-text');
+    var submitBtn = document.getElementById('fb-submit');
+    var hint = document.getElementById('fb-hint');
+    if (!overlay || !openBtn || !textarea || !submitBtn) return;
+
+    var fbType = 'comment';
+    var tabs = overlay.querySelectorAll('.fb-tab');
+
+    openBtn.addEventListener('click', function() { overlay.classList.add('open'); textarea.focus(); });
+    if (closeBtn) closeBtn.addEventListener('click', function() { overlay.classList.remove('open'); });
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.classList.remove('open'); });
+
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        tabs.forEach(function(t) { t.classList.remove('active'); });
+        tab.classList.add('active');
+        fbType = tab.getAttribute('data-fb-type');
+        if (fbType === 'comment') {
+          textarea.placeholder = 'What do you think about this session?';
+          hint.textContent = 'Comments are attached to this session.';
+        } else {
+          textarea.placeholder = 'Bug report, feature idea, or general thoughts about Operad...';
+          hint.textContent = 'This opens a GitHub Discussion on the Operad repo.';
+        }
+      });
+    });
+
+    submitBtn.addEventListener('click', function() {
+      var text = (textarea.value || '').trim();
+      if (!text) { textarea.style.borderColor = '#ef4444'; return; }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '...';
+
+      fetch('https://operad.sh/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: fbType,
+          message: text,
+          sessionUrl: window.location.href,
+        })
+      }).then(function(res) {
+        if (res.ok) {
+          textarea.value = '';
+          submitBtn.textContent = 'Sent!';
+          setTimeout(function() {
+            overlay.classList.remove('open');
+            submitBtn.textContent = 'Send';
+            submitBtn.disabled = false;
+          }, 1500);
+          showToast(fbType === 'comment' ? 'Comment saved.' : 'Feedback submitted to GitHub.');
+        } else {
+          submitBtn.textContent = 'Send';
+          submitBtn.disabled = false;
+          showToast('Something went wrong.');
+        }
+      }).catch(function() {
+        submitBtn.textContent = 'Send';
+        submitBtn.disabled = false;
+        showToast('Network error.');
+      });
+    });
+  })();
+
+  // ─── Subscribe banner (shown after first interaction) ──
+  (function() {
+    var banner = document.getElementById('subscribe-banner');
+    var emailInput = document.getElementById('subscribe-email');
+    var btn = document.getElementById('subscribe-btn');
+    var dismissBtn = document.getElementById('subscribe-dismiss');
+    if (!banner || !emailInput || !btn) return;
+
+    // Already handled — stay hidden forever
+    if (localStorage.getItem('operad-subscribed') || localStorage.getItem('operad-dismiss-subscribe')) return;
+
+    // Reveal on first meaningful interaction
+    var revealed = false;
+    function revealBanner() {
+      if (revealed) return;
+      revealed = true;
+      banner.classList.remove('hidden');
+    }
+
+    // Listen on interactive elements: goals, replay, tree nodes, event rows, tabs
+    document.querySelectorAll('.goal-item, .ev-row, .tab, .gt-goal-item').forEach(function(el) {
+      el.addEventListener('click', revealBanner, { once: true });
+    });
+    var replayBtn = document.getElementById('btn-replay');
+    if (replayBtn) replayBtn.addEventListener('click', revealBanner, { once: true });
+    document.addEventListener('click', function(e) {
+      if (e.target.closest && (e.target.closest('.tree-node') || e.target.closest('.tl-event'))) revealBanner();
+    });
+
+    if (dismissBtn) dismissBtn.addEventListener('click', function() {
+      banner.classList.add('hidden');
+      localStorage.setItem('operad-dismiss-subscribe', '1');
+    });
+
+    btn.addEventListener('click', function() {
+      var email = (emailInput.value || '').trim();
+      if (!email || email.indexOf('@') < 1) {
+        emailInput.style.borderColor = '#ef4444';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '...';
+      fetch('https://operad.sh/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email })
+      }).then(function(res) {
+        if (res.ok) {
+          banner.innerHTML = '<span class="subscribe-ok">Thanks! We will let you know when Operad launches.</span>';
+          localStorage.setItem('operad-subscribed', '1');
+        } else {
+          btn.textContent = 'Notify me';
+          btn.disabled = false;
+          showToast('Something went wrong.');
+        }
+      }).catch(function() {
+        btn.textContent = 'Notify me';
+        btn.disabled = false;
+        showToast('Network error.');
+      });
+    });
+
+    emailInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') btn.click();
+      emailInput.style.borderColor = '#2a2a4a';
+    });
+  })();
 })();
 </script>
 </body>
