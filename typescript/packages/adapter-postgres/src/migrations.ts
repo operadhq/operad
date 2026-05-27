@@ -13,6 +13,7 @@ export async function migrate(sql: postgres.Sql): Promise<void> {
       type TEXT NOT NULL,
       payload JSONB NOT NULL DEFAULT '{}',
       caused_by TEXT REFERENCES operad_events(id),
+      actor TEXT,
       timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 

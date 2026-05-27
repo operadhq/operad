@@ -48,6 +48,26 @@ export function createApp(storage: StorageAdapter) {
   app.use('*', logger())
   app.use('*', cors())
 
+  // ─── Auth ─────────────────────────────────────────────────────────
+
+  app.use('*', async (c, next) => {
+    if (c.req.method === 'GET' && c.req.path === '/') return next()
+
+    const apiKey = process.env.API_KEY
+    if (!apiKey) return next() // Dev mode: no key configured = open access
+
+    const auth = c.req.header('Authorization')
+    if (!auth?.startsWith('Bearer ')) {
+      return c.json({ error: 'Missing Authorization: Bearer <key> header' }, 401)
+    }
+
+    if (auth.slice(7) !== apiKey) {
+      return c.json({ error: 'Invalid API key' }, 401)
+    }
+
+    return next()
+  })
+
   // ─── Health Check ───────────────────────────────────────────────────
 
   app.get('/', (c) =>

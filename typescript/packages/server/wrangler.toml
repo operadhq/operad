@@ -1,0 +1,24 @@
+# Operad API — Cloudflare Container deployment
+# Docs: https://developers.cloudflare.com/containers/
+
+name = "operad-api"
+main = "src/container-worker.ts"
+compatibility_date = "2026-05-01"
+
+[[containers]]
+class_name = "OperadAPI"
+image = "./Dockerfile"
+max_instances = 3
+
+[[durable_objects.bindings]]
+name = "OPERAD_API"
+class_name = "OperadAPI"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OperadAPI"]
+
+# Add Hyperdrive later when you need connection pooling:
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = ""
