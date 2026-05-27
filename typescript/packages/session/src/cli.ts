@@ -12,6 +12,7 @@
  *   replay [--to-event <evt>]   Rebuild graph from events (time-travel)
  *   export-trace [--format]     Export trace as JSONL or text
  *   view [--graph <id>]         Open interactive timeline in browser
+ *   share [--graph <id>]        Share session via URL
  *   stash [--graph <id>]        Show wasted work (redundant reads)
  *   revert <event-id>           Revert to a point (compensating events)
  *   explore <event-id> -n 3     Fork N branches from a point
@@ -1408,6 +1409,67 @@ async function cmdView(positional: string[], flags: Record<string, string | bool
   }
 }
 
+// ─── Share Command ──────────────────────────────────────────────────────────
+
+async function cmdShare(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const graphId = (flags['graph'] as string) ?? positional[0]
+  if (!graphId) {
+    console.error(`${c.red}Error:${c.reset} No graph specified.`)
+    console.error(`Usage: operad-session share --graph <id>`)
+    process.exit(1)
+  }
+
+  const shareHost = process.env.OPERAD_SHARE_HOST ?? 'https://operad.sh'
+
+  // ── Load events & render HTML ───────────────────────────────────────
+  const storage = getStorage()
+  const events = await storage.queryEvents(graphId, {})
+  storage.close()
+
+  if (events.length === 0) {
+    console.error(`${c.yellow}No events found${c.reset} for graph: ${graphId}`)
+    process.exit(0)
+  }
+
+  const html = renderSessionHtml(events, {
+    title: `Session: ${graphId}`,
+  })
+
+  console.log(`${c.dim}Uploading ${events.length} events...${c.reset}`)
+
+  // ── Upload ──────────────────────────────────────────────────────────
+  const res = await fetch(`${shareHost}/s`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'X-Graph-Id': graphId,
+    },
+    body: html,
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    console.error(`${c.red}Upload failed${c.reset} (${res.status}): ${body}`)
+    process.exit(1)
+  }
+
+  const result = (await res.json()) as { url: string; hash: string; expiresAt: string }
+  console.log(`\n${c.green}Shared!${c.reset} ${result.url}`)
+  console.log(`${c.dim}Expires: ${new Date(result.expiresAt).toLocaleDateString()}${c.reset}`)
+
+  // ── Copy to clipboard ───────────────────────────────────────────────
+  try {
+    const clipCmd = platform() === 'darwin' ? 'pbcopy' : 'xclip -selection clipboard'
+    spawnSync(clipCmd.split(' ')[0], clipCmd.split(' ').slice(1), {
+      input: result.url,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    })
+    console.log(`${c.cyan}Copied${c.reset} to clipboard`)
+  } catch {
+    // Clipboard not available — that's fine
+  }
+}
+
 // ─── Init Command ───────────────────────────────────────────────────────────
 
 async function cmdInit(flags: Record<string, string | boolean>): Promise<void> {
@@ -1648,6 +1710,7 @@ ${c.bold}COMMANDS${c.reset}
   ${c.green}export-trace${c.reset} --graph <id>     Export trace as JSONL or text
   ${c.green}stash${c.reset} --graph <id>           Show wasted work (redundant reads)
   ${c.green}revert${c.reset} <event-id> --graph <id>  Revert to a point (compensating events)
+  ${c.green}share${c.reset} --graph <id>           Share session via URL (like Loom for agent traces)
   ${c.green}view${c.reset} --graph <id>            Open tabbed session viewer in browser (--classic for old tree view)
   ${c.green}explore${c.reset} <event-id> -n 3 --graph <id>  Fork N branches from a point
   ${c.green}demo${c.reset} [<name>]                 Run a built-in demo (--list to see all)
@@ -1695,6 +1758,9 @@ ${c.bold}EXAMPLES${c.reset}
 
   ${c.dim}# Export trace as JSONL (pipe to other tools)${c.reset}
   operad-session export-trace --graph session_1716000000000 --format jsonl --out trace.jsonl
+
+  ${c.dim}# Share a session via URL${c.reset}
+  operad-session share --graph session_1716000000000
 
   ${c.dim}# Open interactive timeline in browser${c.reset}
   operad-session view --graph session_1716000000000
@@ -1771,6 +1837,9 @@ async function main() {
       break
     case 'explore':
       await cmdExplore(positional, flags)
+      break
+    case 'share':
+      await cmdShare(positional, flags)
       break
     case 'view':
       await cmdView(positional, flags)
