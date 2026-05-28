@@ -1448,6 +1448,35 @@ async function cmdShare(positional: string[], flags: Record<string, string | boo
   })
 
   if (!res.ok) {
+    if (res.status === 429) {
+      console.error(`\n${c.yellow}Free tier limit reached${c.reset} (3 shares/day).`)
+      console.error(`Want more? Drop your email and we'll hook you up:\n`)
+
+      // Prompt for email
+      process.stdout.write(`  ${c.cyan}Email:${c.reset} `)
+      const email = await new Promise<string>((resolve) => {
+        let data = ''
+        process.stdin.setEncoding('utf-8')
+        process.stdin.once('data', (chunk: string) => {
+          data = chunk.trim()
+          resolve(data)
+        })
+        // Timeout after 30s
+        setTimeout(() => resolve(''), 30_000)
+      })
+
+      if (email && email.includes('@')) {
+        await fetch(`${shareHost}/s/request-access`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, graphId }),
+        }).catch(() => {})
+        console.error(`\n${c.green}Got it!${c.reset} We'll reach out shortly.`)
+      } else {
+        console.error(`\nNo worries — email ${c.cyan}hello@operad.sh${c.reset} anytime.`)
+      }
+      process.exit(0)
+    }
     const body = await res.text()
     console.error(`${c.red}Upload failed${c.reset} (${res.status}): ${body}`)
     process.exit(1)
