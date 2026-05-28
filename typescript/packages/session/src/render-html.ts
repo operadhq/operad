@@ -1039,7 +1039,7 @@ function buildHtml(
       submitBtn.disabled = true;
       submitBtn.textContent = '...';
 
-      fetch('https://operad.sh/feedback', {
+      fetch('https://www.operad.sh/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1112,7 +1112,7 @@ function buildHtml(
       }
       btn.disabled = true;
       btn.textContent = '...';
-      fetch('https://operad.sh/subscribe', {
+      fetch('https://www.operad.sh/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email })
@@ -3574,7 +3574,7 @@ export function renderSessionHtml(
       submitBtn.disabled = true;
       submitBtn.textContent = '...';
 
-      fetch('https://operad.sh/feedback', {
+      fetch('https://www.operad.sh/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3647,7 +3647,7 @@ export function renderSessionHtml(
       }
       btn.disabled = true;
       btn.textContent = '...';
-      fetch('https://operad.sh/subscribe', {
+      fetch('https://www.operad.sh/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email })

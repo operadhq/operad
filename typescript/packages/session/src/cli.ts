@@ -1419,7 +1419,7 @@ async function cmdShare(positional: string[], flags: Record<string, string | boo
     process.exit(1)
   }
 
-  const shareHost = process.env.OPERAD_SHARE_HOST ?? 'https://operad.sh'
+  const shareHost = process.env.OPERAD_SHARE_HOST ?? 'https://www.operad.sh'
 
   // ── Load events & render HTML ───────────────────────────────────────
   const storage = getStorage()
