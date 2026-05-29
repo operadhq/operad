@@ -14,9 +14,9 @@
  */
 
 import { resolve } from 'node:path'
-import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { SqliteAdapter } from '@operad/adapter-sqlite'
+import { DB_PATH, ensureHome } from './paths.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,9 +47,8 @@ export interface ToolHistoryEntry {
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 function getDbPath(): string {
-  const override = process.env['OPERAD_DB_PATH']
-  if (override) return resolve(override)
-  return resolve(homedir(), '.operad', 'session.db')
+  ensureHome()
+  return DB_PATH
 }
 
 function getGraphId(): string {
