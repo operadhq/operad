@@ -17,9 +17,10 @@
  *   revert <event-id>           Revert to a point (compensating events)
  *   explore <event-id> -n 3     Fork N branches from a point
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { homedir, tmpdir, platform } from 'node:os'
+import { DB_PATH, ensureHome } from './paths.js'
 import { execSync, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createRuntime } from '@operad/core'
@@ -30,13 +31,11 @@ import { detectStash } from './waste.js'
 import { renderHtmlGraph, renderSessionHtml } from './render-html.js'
 import { extractForkContext } from './context.js'
 import { detectHarnesses, installHooks } from './harness.js'
+import { watch } from './watch.js'
 import type { HarnessType } from './harness.js'
 import type { RenderableObject, RenderableRelation } from '@operad/core'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-
-const DB_DIR = join(homedir(), '.operad')
-const DB_PATH = join(DB_DIR, 'session.db')
 
 // ─── Color Helpers ──────────────────────────────────────────────────────────
 
@@ -74,7 +73,7 @@ function formatTimestamp(ts: string): string {
 }
 
 function getStorage(): SqliteAdapter {
-  mkdirSync(DB_DIR, { recursive: true })
+  ensureHome()
   return new SqliteAdapter(DB_PATH)
 }
 
@@ -1876,6 +1875,33 @@ async function main() {
     case 'demo':
       await cmdDemo(positional, flags)
       break
+    case 'watch': {
+      // Everything after 'watch' (or after '--') is the command to wrap
+      const dashIdx = argv.indexOf('--')
+      const cmdArgs = dashIdx !== -1
+        ? argv.slice(dashIdx + 1)
+        : positional
+      await watch({ command: cmdArgs, name: flags['name'] as string | undefined })
+      break
+    }
+    case 'tail': {
+      // Delegate to system tail — just like OpenLogs
+      const { spawnSync } = await import('node:child_process')
+      const { LOGS_DIR } = await import('./paths.js')
+      const target = positional[0] ?? 'latest'
+      const ext = flags['raw'] ? 'raw.log' : 'txt'
+      const logPath = join(LOGS_DIR, `${target}.${ext}`)
+      const tailArgs = flags['follow'] || flags['f'] ? ['-f'] : []
+      const nLines = flags['n'] as string | undefined
+      if (nLines) tailArgs.push('-n', nLines)
+      const result = spawnSync('tail', [...tailArgs, logPath], { stdio: 'inherit' })
+      if (result.status !== 0) {
+        console.error(`${c.red}No log found for "${target}" in ${LOGS_DIR}.${c.reset}`)
+        console.error(`Run your command with "operad-session watch -- <command>" first.`)
+        process.exit(1)
+      }
+      break
+    }
     default:
       // Backward compat: if it looks like a file path, treat as commit
       if (command.endsWith('.jsonl') || command.includes('/')) {

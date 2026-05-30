@@ -22,10 +22,8 @@
  *   }
  */
 
-import { resolve } from 'node:path'
-import { homedir } from 'node:os'
-import { mkdirSync } from 'node:fs'
 import { SqliteAdapter } from '@operad/adapter-sqlite'
+import { DB_PATH, ensureHome } from './paths.js'
 import { createRuntime } from '@operad/core'
 import type { Runtime, JsonValue } from '@operad/core'
 import { forkForSubagent, detectParentGraph } from './subagent.js'
@@ -47,12 +45,8 @@ interface HookPayload {
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 function getDbPath(): string {
-  const override = process.env['OPERAD_DB_PATH']
-  if (override) return resolve(override)
-
-  const dir = resolve(homedir(), '.operad')
-  mkdirSync(dir, { recursive: true })
-  return resolve(dir, 'session.db')
+  ensureHome()
+  return DB_PATH
 }
 
 function getGraphId(payload: HookPayload): string {

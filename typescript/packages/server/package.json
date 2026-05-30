@@ -8,6 +8,7 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "operad": "./dist/cli.js",
+    "op": "./dist/cli.js",
     "operad-server": "./dist/cli.js",
     "operad-worker": "./dist/worker.js",
     "operad-scheduler": "./dist/scheduler.js",

@@ -8,6 +8,7 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "operad-session": "./dist/cli.js",
+    "ops": "./dist/cli.js",
     "operad-hook": "./dist/hook.js"
   },
   "exports": {
